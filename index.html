@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="旅記">
+<title>旅記 Trip Notes</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+/* ================= 外觀設定（改這裡就能調整整個 app） =================
+   顏色：用色碼，例如 #0f766e。可以到 https://htmlcolorcodes.com 挑。
+   大小：--font-size 是全站基準字級，其他文字、按鈕、間距都會跟著等比例縮放。
+   App 內「設定 > 外觀」也可以直接調，調的結果會蓋過這裡的預設值。 */
+:root{
+  /* 字級與形狀 */
+  --font-size:15px;        /* 基準字級（建議 13–19px） */
+  --radius:10px;           /* 卡片、按鈕的圓角（0 = 直角） */
+  --gutter:16px;           /* 畫面左右留白 */
+  --font:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC",sans-serif;
+
+  /* 淺色模式顏色 */
+  --bg:#f6f5f2;            /* 背景 */
+  --card:#ffffff;          /* 卡片、輸入框底色 */
+  --ink:#1f2328;           /* 主要文字 */
+  --muted:#6b7078;         /* 次要文字 */
+  --line:#e4e2dd;          /* 框線 */
+  --accent:#e37a16;        /* 主色（按鈕、選取中的分頁） */
+  --accent-ink:#ffffff;    /* 主色按鈕上的文字 */
+  --danger:#b42318;        /* 刪除等警示 */
+
+  /* 類別顏色（地圖標記與列表圓點） */
+  --c-food:#d9480f;--c-hotel:#5f3dc4;--c-sight:#1971c2;--c-shop:#c2255c;--c-other:#495057;
+}
+/* 深色模式顏色（跟隨系統，或在 app 內指定） */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#121417;--card:#1c1f24;--ink:#e8e6e3;--muted:#9aa0a6;--line:#2c3036;--accent:#e37a16;--accent-ink:#ffffff;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121417;--card:#1c1f24;--ink:#e8e6e3;--muted:#9aa0a6;--line:#2c3036;--accent:#e37a16;--accent-ink:#ffffff;
+}
+/* ================= 以下為版面結構，一般不需要改 ================= */
+html{font-size:var(--font-size)}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:1rem/1.5 var(--font);-webkit-tap-highlight-color:transparent}
+header{position:sticky;top:0;z-index:500;background:var(--bg);padding:calc(env(safe-area-inset-top) + 10px) var(--gutter) 8px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line)}
+header h1{font-size:1.2rem;margin:0;flex:1}
+main{padding:12px var(--gutter) calc(80px + env(safe-area-inset-bottom));max-width:820px;margin:0 auto}
+nav.tabs{position:fixed;bottom:0;left:0;right:0;z-index:600;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav.tabs button{flex:1;border:0;border-radius:0;background:none;color:var(--muted);padding:14px 0 12px;font-size:.95rem;justify-content:center}
+nav.tabs button.on{color:var(--accent);font-weight:600}
+button,.btn{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:var(--radius);padding:7px 12px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+.btn.primary,button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button.sm,.btn.sm{padding:4px 9px;font-size:0.867rem;border-radius:calc(var(--radius) * .8)}
+button.danger{color:var(--danger)}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:8px 10px;width:100%}
+textarea{min-height:70px;resize:vertical}
+label{display:block;font-size:0.867rem;color:var(--muted);margin:10px 0 4px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row>*{min-width:0}
+.grow{flex:1}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:8px 0;scrollbar-width:none}
+.chip{white-space:nowrap;border-radius:999px;padding:4px 12px;font-size:0.867rem}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:calc(var(--radius) * 1.4);padding:12px;margin:8px 0}
+.place{display:flex;gap:10px;align-items:flex-start}
+.dot{width:2.2rem;height:2.2rem;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:.9rem;font-weight:600;flex:none}
+.place .info{flex:1;min-width:0}
+.place .name,.prow .name{font-weight:600;overflow-wrap:anywhere}
+.prow{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.prow:first-child{border-top:0}
+.prow .info{flex:1;min-width:0;cursor:pointer}
+.one{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot.sm{width:1.8rem;height:1.8rem;font-size:.8rem}
+[data-focus]{cursor:pointer}
+.seg{display:inline-flex}.seg button{border-radius:0}.seg button:first-child{border-radius:calc(var(--radius) * .8) 0 0 calc(var(--radius) * .8)}.seg button:last-child{border-radius:0 calc(var(--radius) * .8) calc(var(--radius) * .8) 0;margin-left:-1px}
+button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.listmap{position:sticky;top:calc(env(safe-area-inset-top) + 52px);z-index:400;height:36vh}
+.hl{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--radius)}
+.meta{color:var(--muted);font-size:0.867rem;overflow-wrap:anywhere}
+.tag{display:inline-block;font-size:0.733rem;border:1px solid var(--line);border-radius:6px;padding:0 6px;margin:2px 4px 0 0;color:var(--muted)}
+.empty{color:var(--muted);text-align:center;padding:40px 10px}
+#bigmap{height:calc(100vh - 210px);min-height:320px;border-radius:calc(var(--radius) * 1.4);border:1px solid var(--line)}
+.tripmap{height:260px;border-radius:calc(var(--radius) * 1.4);border:1px solid var(--line);margin:8px 0}
+h2{font-size:1.13rem;margin:14px 0 6px}
+h3{font-size:1rem;margin:10px 0 4px}
+.stop{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)}
+.stop:first-child{border-top:0}
+.num{width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-size:0.8rem;font-weight:700;flex:none}
+.leg{font-size:0.8rem;color:var(--muted);padding-left:32px}
+dialog{border:0;border-radius:calc(var(--radius) * 1.6);padding:0;width:min(560px,calc(100vw - 24px));max-height:88vh;background:var(--card);color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog .body{padding:16px;overflow:auto;max-height:calc(88vh - 60px)}
+dialog .foot{display:flex;gap:8px;justify-content:flex-end;padding:10px 16px;border-top:1px solid var(--line)}
+.pick{display:flex;gap:8px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--line)}
+.pick input{width:auto}
+.hint{font-size:0.867rem;color:var(--muted);background:var(--bg);border-radius:var(--radius);padding:10px 12px;margin:8px 0}
+.hint ol{margin:4px 0;padding-left:20px}
+iframe.mymap{width:100%;height:420px;border:1px solid var(--line);border-radius:calc(var(--radius) * 1.4)}
+.toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:var(--radius);z-index:2000;font-size:0.933rem;max-width:90vw}
+.daytabs{display:flex;gap:6px;overflow-x:auto;padding:6px 0}
+</style>
+</head>
+<body>
+<header><h1 id="title">旅記</h1><span id="headActions"></span></header>
+<main id="view"></main>
+<nav class="tabs">
+  <button data-tab="places">地點</button>
+  <button data-tab="map">地圖</button>
+  <button data-tab="trips">行程</button>
+  <button data-tab="import">設定</button>
+</nav>
+<dialog id="dlg"></dialog>
+
+<script>
+// ---------- data ----------
+const KEY='tripnote.v1';
+const CATS={food:{n:'餐廳',i:'餐',c:'var(--c-food)'},hotel:{n:'住宿',i:'宿',c:'var(--c-hotel)'},sight:{n:'景點',i:'景',c:'var(--c-sight)'},shop:{n:'購物',i:'購',c:'var(--c-shop)'},other:{n:'其他',i:'他',c:'var(--c-other)'}};
+let db=load();
+function load(){try{const d=JSON.parse(localStorage.getItem(KEY));if(d&&d.places)return Object.assign({trips:[],mymaps:[]},d)}catch(e){}return{places:[],trips:[],mymaps:[]}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(db))}catch(e){toast('儲存失敗：'+e.message)}}
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const byId=id=>db.places.find(p=>p.id===id);
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2600)}
+
+// ---------- Google Maps link parsing ----------
+function parseGmaps(url){
+  const r={url:url.trim()};
+  let m;
+  if((m=url.match(/\/maps\/place\/([^/@?]+)/)))r.name=decodeURIComponent(m[1].replace(/\+/g,' '));
+  if((m=url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/))){r.lat=+m[1];r.lng=+m[2]}
+  else if((m=url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/))){r.lat=+m[1];r.lng=+m[2]}
+  else if((m=url.match(/[?&](?:q|query|ll|destination)=(-?\d+\.\d+)(?:,|%2C)\s*(-?\d+\.\d+)/))){r.lat=+m[1];r.lng=+m[2]}
+  else if((m=url.match(/\/search\/(-?\d+\.\d+),\s*\+?(-?\d+\.\d+)/))){r.lat=+m[1];r.lng=+m[2]}
+  if(!r.name&&(m=url.match(/[?&](?:q|query)=([^&]+)/))){const q=decodeURIComponent(m[1].replace(/\+/g,' '));if(!/^-?\d+\.\d+,/.test(q))r.name=q}
+  return r;
+}
+function gmapsLink(p){
+  if(p.url&&/google\.|goo\.gl/.test(p.url))return p.url;
+  if(p.lat!=null)return `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name+' '+(p.address||''))}`;
+}
+async function geocode(q){
+  const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=zh-TW&q='+encodeURIComponent(q));
+  const j=await r.json();if(!j.length)return null;
+  return{lat:+j[0].lat,lng:+j[0].lon,address:j[0].display_name};
+}
+function guessCat(t){
+  t=(t||'').toLowerCase();
+  if(/hotel|hostel|\binn\b|resort|飯店|酒店|旅館|民宿|ホテル|ゲストハウス/.test(t))return'hotel';
+  if(/restaurant|cafe|coffee|bar|ramen|sushi|餐|食|麵|咖啡|居酒屋|料理|燒肉|拉麵|甜點|カフェ|食堂|寿司/.test(t))return'food';
+  if(/mall|store|shop|market|百貨|商店|市場|購物|outlet|drugstore|藥妝/.test(t))return'shop';
+  if(/temple|shrine|-dera|-ji\b|jinja|park|museum|tower|castle|寺|神社|公園|博物館|美術館|塔|城|景|山|湖|海灘|老街/.test(t))return'sight';
+  return'other';
+}
+
+// ---------- routing ----------
+let tab='places',filt={cat:'all',q:'',tag:'all'},openTrip=null,openDay=0,leaf=null;
+document.querySelectorAll('nav.tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;openTrip=null;render()});
+function render(){
+  document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
+  if(leaf){leaf.remove();leaf=null}
+  document.getElementById('headActions').innerHTML='';
+  ({places:renderPlaces,map:renderMap,trips:renderTrips,import:renderImport})[tab]();
+  window.scrollTo(0,0);
+}
+const V=()=>document.getElementById('view');
+const setTitle=(t,actions='')=>{document.getElementById('title').textContent=t;document.getElementById('headActions').innerHTML=actions};
+function allTags(){const s=new Set();db.places.forEach(p=>(p.tags||[]).forEach(t=>s.add(t)));return[...s].sort()}
+function filtered(){
+  const q=filt.q.trim().toLowerCase();
+  return db.places.filter(p=>(filt.cat==='all'||p.cat===filt.cat)&&(filt.tag==='all'||(p.tags||[]).includes(filt.tag))&&
+    (!q||[p.name,p.address,p.note,(p.tags||[]).join(' ')].join(' ').toLowerCase().includes(q)));
+}
+function filterBar(){
+  const tags=allTags();
+  return `<div class="row"><input class="grow" id="q" placeholder="搜尋名稱、地址、筆記…" value="${esc(filt.q)}">
+  ${tags.length?`<select id="tagSel" style="width:auto;max-width:40%"><option value="all">全部清單</option>${tags.map(t=>`<option ${filt.tag===t?'selected':''}>${esc(t)}</option>`).join('')}</select>`:''}</div>
+  <div class="chips">${[['all','全部']].concat(Object.entries(CATS).map(([k,v])=>[k,v.n])).map(([k,n])=>`<button class="chip ${filt.cat===k?'on':''}" data-cat="${k}">${n}</button>`).join('')}</div>`;
+}
+function bindFilter(re){
+  const q=document.getElementById('q');q.oninput=()=>{filt.q=q.value;re(true)};
+  const ts=document.getElementById('tagSel');if(ts)ts.onchange=()=>{filt.tag=ts.value;re()};
+  document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{filt.cat=b.dataset.cat;re()});
+}
+function placeCard(p){
+  const c=CATS[p.cat]||CATS.other;
+  return `<div class="card place" data-pid="${p.id}"><div class="dot" data-focus="${p.id}" style="background:${c.c}">${c.i}</div>
+  <div class="info"><div class="name">${esc(p.name)} ${p.rating?'<span class="meta">'+'★'.repeat(p.rating)+'</span>':''}</div>
+  ${p.address?`<div class="meta">${esc(p.address)}</div>`:''}
+  ${p.note?`<div class="meta" style="color:var(--ink)">${esc(p.note)}</div>`:''}
+  <div>${(p.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${p.lat==null?'<span class="tag" style="color:var(--danger)">無座標</span>':''}</div>
+  <div class="row" style="margin-top:6px"><button class="sm primary" data-add="${p.id}">加入行程</button><a class="btn sm" href="${esc(gmapsLink(p))}" target="_blank" rel="noopener">Google Maps ↗</a>
+  <button class="sm" data-edit="${p.id}">編輯</button></div></div></div>`;
+}
+function placeRow(p){
+  const c=CATS[p.cat]||CATS.other;
+  return `<div class="prow" data-pid="${p.id}"><div class="dot sm" data-focus="${p.id}" style="background:${c.c}">${c.i}</div>
+  <div class="info" data-edit="${p.id}"><div class="name">${esc(p.name)}</div>
+  <div class="meta one">${[...(p.tags||[]),p.note].filter(Boolean).map(esc).join(' · ')||'&nbsp;'}${p.lat==null?' · <span style="color:var(--danger)">無座標</span>':''}</div></div>
+  <button class="sm primary" data-add="${p.id}">加入</button></div>`;
+}
+
+// ---------- places ----------
+let ui=(()=>{try{return Object.assign({view:'card',showMap:false},JSON.parse(localStorage.getItem('tripnote.ui')))}catch(e){return{view:'card',showMap:false}}})();
+function saveUi(){try{localStorage.setItem('tripnote.ui',JSON.stringify(ui))}catch(e){}}
+let plMarkers={};
+function renderPlaces(keepFocus){
+  if(keepFocus===true)return refreshPlaces();
+  setTitle('我的地點',`<button class="primary sm" id="addBtn">＋ 新增</button>`);
+  document.getElementById('addBtn').onclick=()=>editPlace();
+  V().innerHTML=filterBar()+`<div class="row" style="justify-content:space-between">
+    <span class="meta" id="pcount"></span>
+    <span class="row"><span class="seg"><button class="sm ${ui.view==='card'?'on':''}" data-view="card">卡片</button><button class="sm ${ui.view==='list'?'on':''}" data-view="list">條列</button></span>
+    <button class="sm ${ui.showMap?'on':''}" id="mapTog">${ui.showMap?'隱藏地圖':'顯示地圖'}</button></span></div>
+    ${ui.showMap?'<div id="plmap" class="tripmap listmap"></div>':''}<div id="plist"></div>`;
+  bindFilter(renderPlaces);
+  document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{ui.view=b.dataset.view;saveUi();renderPlaces()});
+  document.getElementById('mapTog').onclick=()=>{ui.showMap=!ui.showMap;saveUi();render()};
+  if(ui.showMap)leaf=makeMap('plmap');
+  refreshPlaces(true);
+}
+function refreshPlaces(fit){
+  const list=filtered();
+  document.getElementById('pcount').textContent=`${list.length} / ${db.places.length} 個地點`;
+  document.getElementById('plist').innerHTML=list.length?(ui.view==='list'?'<div class="card" style="padding:4px 12px">'+list.map(placeRow).join('')+'</div>':list.map(placeCard).join(''))
+    :`<div class="empty">${db.places.length?'沒有符合的地點':'還沒有地點。<br>點右上「＋ 新增」貼上 Google Maps 連結，<br>或到「設定」匯入你的 Google 收藏清單。'}</div>`;
+  document.querySelectorAll('#plist [data-edit]').forEach(b=>b.onclick=()=>editPlace(byId(b.dataset.edit)));
+  document.querySelectorAll('#plist [data-add]').forEach(b=>b.onclick=()=>addToTrip(byId(b.dataset.add)));
+  if(!leaf)return;
+  Object.values(plMarkers).forEach(m=>m.remove());plMarkers={};
+  const pts=list.filter(p=>p.lat!=null);
+  pts.forEach(p=>{plMarkers[p.id]=marker(p).addTo(leaf).on('click',()=>{const el=document.querySelector(`#plist [data-pid="${p.id}"]`);if(el){el.scrollIntoView({block:'nearest',behavior:'smooth'});el.classList.add('hl');setTimeout(()=>el.classList.remove('hl'),1500)}})});
+  if(pts.length&&fit!==false)leaf.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lng])).pad(.15),{maxZoom:15});
+  document.querySelectorAll('#plist [data-focus]').forEach(d=>d.onclick=()=>{const m=plMarkers[d.dataset.focus];if(!m)return toast('這個地點沒有座標');
+    document.getElementById('plmap').scrollIntoView({block:'nearest',behavior:'smooth'});leaf.setView(m.getLatLng(),Math.max(leaf.getZoom(),15));m.openPopup()});
+}
+let lastPick={trip:null,day:0};
+function addToTrip(p){
+  const d=document.getElementById('dlg');
+  if(!db.trips.length){
+    d.innerHTML=`<div class="body"><h2 style="margin-top:0">加入行程</h2><div class="meta">還沒有行程，先建立一個：</div>
+    <label>行程名稱</label><input id="nt_name" placeholder="例如：京都 5 天"><label>天數</label><input id="nt_days" type="number" min="1" value="3"></div>
+    <div class="foot"><button id="nt_c">取消</button><button class="primary" id="nt_ok">建立並加入</button></div>`;
+    d.querySelector('#nt_c').onclick=()=>d.close();
+    d.querySelector('#nt_ok').onclick=()=>{const n=d.querySelector('#nt_name').value.trim();if(!n)return toast('請輸入行程名稱');
+      const t={id:uid(),name:n,start:'',days:Array.from({length:Math.max(1,+d.querySelector('#nt_days').value||1)},()=>({stops:[],note:''}))};
+      t.days[0].stops.push(p.id);db.trips.unshift(t);save();lastPick={trip:t.id,day:0};d.close();toast(`已加入「${n}」Day 1`)};
+    return d.showModal();
+  }
+  let tid=db.trips.some(t=>t.id===lastPick.trip)?lastPick.trip:db.trips[0].id,day=lastPick.day;
+  const draw=()=>{
+    const t=db.trips.find(x=>x.id===tid);if(day>=t.days.length)day=0;
+    const where=t.days.map((dy,i)=>dy.stops.includes(p.id)?'Day '+(i+1):'').filter(Boolean);
+    d.innerHTML=`<div class="body"><h2 style="margin-top:0">加入行程</h2><div class="name" style="font-weight:600">${esc(p.name)}</div>
+    <label>行程</label><select id="at_t">${db.trips.map(x=>`<option value="${x.id}" ${x.id===tid?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
+    <label>哪一天</label><div class="daytabs" style="flex-wrap:wrap">${t.days.map((dy,i)=>`<button class="chip ${i===day?'on':''}" data-d="${i}">Day ${i+1} ${dayDate(t,i)}<span class="meta"> · ${dy.stops.length}</span></button>`).join('')}</div>
+    ${where.length?`<div class="meta">已在這個行程的 ${where.join('、')}</div>`:''}</div>
+    <div class="foot"><button id="at_c">取消</button><button class="primary" id="at_ok">加入 Day ${day+1}</button></div>`;
+    d.querySelector('#at_t').onchange=e=>{tid=e.target.value;day=0;draw()};
+    d.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{day=+b.dataset.d;draw()});
+    d.querySelector('#at_c').onclick=()=>d.close();
+    d.querySelector('#at_ok').onclick=()=>{const dy=t.days[day];if(dy.stops.includes(p.id))return toast('這天已經有了');dy.stops.push(p.id);save();lastPick={trip:tid,day};d.close();toast(`已加入「${t.name}」Day ${day+1}`)};
+  };
+  draw();d.showModal();
+}
+function editPlace(p){
+  const isNew=!p;p=p?{...p}:{id:uid(),cat:'other',tags:[],created:Date.now()};
+  const d=document.getElementById('dlg');
+  d.innerHTML=`<div class="body"><h2 style="margin-top:0">${isNew?'新增地點':'編輯地點'}</h2>
+  <label>Google Maps 連結（貼上自動帶入名稱與座標）</label><input id="f_url" value="${esc(p.url||'')}" placeholder="https://www.google.com/maps/place/...">
+  <div class="meta" style="margin-top:4px">提示：手機 Google Maps 的「分享」短網址（maps.app.goo.gl）無法自動解析座標，請先在瀏覽器打開後複製完整網址，或直接用下方「查座標」。</div>
+  <label>名稱</label><input id="f_name" value="${esc(p.name||'')}">
+  <div class="row"><div class="grow"><label>類別</label><select id="f_cat">${Object.entries(CATS).map(([k,v])=>`<option value="${k}" ${p.cat===k?'selected':''}>${v.n}</option>`).join('')}</select></div>
+  <div class="grow"><label>評分</label><select id="f_rating"><option value="0">—</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${p.rating==n?'selected':''}>${'★'.repeat(n)}</option>`).join('')}</select></div></div>
+  <label>地址</label><input id="f_addr" value="${esc(p.address||'')}">
+  <div class="row"><div class="grow"><label>緯度</label><input id="f_lat" inputmode="decimal" value="${p.lat??''}"></div><div class="grow"><label>經度</label><input id="f_lng" inputmode="decimal" value="${p.lng??''}"></div>
+  <div style="align-self:flex-end"><button id="f_geo">查座標</button></div></div>
+  <label>清單 / 標籤（逗號分隔，例如：東京2026, 想去）</label><input id="f_tags" value="${esc((p.tags||[]).join(', '))}">
+  <label>筆記</label><textarea id="f_note">${esc(p.note||'')}</textarea></div>
+  <div class="foot">${isNew?'':'<button class="danger" id="f_del" style="margin-right:auto">刪除</button>'}<button id="f_cancel">取消</button><button class="primary" id="f_save">儲存</button></div>`;
+  const $=id=>d.querySelector('#'+id);
+  $('f_url').oninput=()=>{const g=parseGmaps($('f_url').value);if(g.name&&!$('f_name').value){$('f_name').value=g.name;$('f_cat').value=guessCat(g.name)}if(g.lat!=null){$('f_lat').value=g.lat;$('f_lng').value=g.lng}};
+  $('f_geo').onclick=async()=>{const q=[$('f_name').value,$('f_addr').value].filter(Boolean).join(' ');if(!q)return toast('先填名稱或地址');
+    $('f_geo').textContent='查詢中…';try{const g=await geocode(q)||await geocode($('f_name').value);if(!g)toast('找不到，請改用地址或手動填');else{$('f_lat').value=g.lat.toFixed(6);$('f_lng').value=g.lng.toFixed(6);if(!$('f_addr').value)$('f_addr').value=g.address}}catch(e){toast('查詢失敗')}$('f_geo').textContent='查座標'};
+  $('f_cancel').onclick=()=>d.close();
+  if(!isNew)$('f_del').onclick=()=>{if(!confirm('刪除「'+p.name+'」？'))return;db.places=db.places.filter(x=>x.id!==p.id);db.trips.forEach(t=>t.days.forEach(dy=>dy.stops=dy.stops.filter(s=>s!==p.id)));save();d.close();render()};
+  $('f_save').onclick=()=>{
+    p.url=$('f_url').value.trim();p.name=$('f_name').value.trim();if(!p.name)return toast('請輸入名稱');
+    p.cat=$('f_cat').value;p.rating=+$('f_rating').value;p.address=$('f_addr').value.trim();p.note=$('f_note').value.trim();
+    const la=parseFloat($('f_lat').value),ln=parseFloat($('f_lng').value);if(isFinite(la)&&isFinite(ln)){p.lat=la;p.lng=ln}else{delete p.lat;delete p.lng}
+    p.tags=$('f_tags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
+    if(isNew)db.places.unshift(p);else db.places[db.places.findIndex(x=>x.id===p.id)]=p;
+    save();d.close();render();
+  };
+  d.showModal();
+}
+
+// ---------- map ----------
+function makeMap(el){
+  const m=L.map(el,{zoomControl:true}).setView([25.04,121.56],5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(m);
+  return m;
+}
+function marker(p,label){
+  const c=CATS[p.cat]||CATS.other;
+  const icon=L.divIcon({className:'',iconSize:[28,28],iconAnchor:[14,14],html:`<div style="width:28px;height:28px;border-radius:50%;background:${c.c};color:#fff;display:grid;place-items:center;font-size:${label?13:14}px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">${label??c.i}</div>`});
+  return L.marker([p.lat,p.lng],{icon}).bindPopup(`<b>${esc(p.name)}</b><br>${p.note?esc(p.note)+'<br>':''}<a href="${esc(gmapsLink(p))}" target="_blank" rel="noopener">Google Maps 開啟 ↗</a>`);
+}
+function renderMap(){
+  setTitle('地圖總覽');
+  V().innerHTML=filterBar()+'<div id="bigmap"></div>';
+  bindFilter(renderMap);
+  leaf=makeMap('bigmap');
+  const pts=filtered().filter(p=>p.lat!=null);
+  pts.forEach(p=>marker(p).addTo(leaf));
+  if(pts.length)leaf.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lng])).pad(.15),{maxZoom:15});
+  if(navigator.geolocation){const b=L.control({position:'topright'});b.onAdd=()=>{const e=L.DomUtil.create('button');e.textContent='我的位置';e.style.cssText='padding:4px 8px';e.onclick=ev=>{L.DomEvent.stop(ev);navigator.geolocation.getCurrentPosition(pos=>{const ll=[pos.coords.latitude,pos.coords.longitude];L.circleMarker(ll,{radius:8,color:'#1971c2'}).addTo(leaf);leaf.setView(ll,15)},()=>toast('無法取得位置'))};return e};b.addTo(leaf)}
+}
+
+// ---------- trips ----------
+function dist(a,b){const R=6371,r=Math.PI/180,dLa=(b.lat-a.lat)*r,dLn=(b.lng-a.lng)*r;const h=Math.sin(dLa/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLn/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+function renderTrips(){
+  if(openTrip)return renderTrip();
+  setTitle('我的行程',`<button class="primary sm" id="newTrip">＋ 新行程</button>`);
+  document.getElementById('newTrip').onclick=()=>{const n=prompt('行程名稱（例如：京都 5 天）');if(!n)return;const days=parseInt(prompt('幾天？','3'))||1;
+    const t={id:uid(),name:n,start:'',days:Array.from({length:days},()=>({stops:[],note:''}))};db.trips.unshift(t);save();openTrip=t.id;openDay=0;render()};
+  V().innerHTML=db.trips.length?db.trips.map(t=>`<div class="card" data-trip="${t.id}" style="cursor:pointer"><div class="name" style="font-weight:600">${esc(t.name)}</div>
+    <div class="meta">${t.start?esc(t.start)+' 起 · ':''}${t.days.length} 天 · ${t.days.reduce((a,d)=>a+d.stops.length,0)} 個停留點</div></div>`).join('')
+    :'<div class="empty">還沒有行程。點右上「＋ 新行程」開始排。</div>';
+  document.querySelectorAll('[data-trip]').forEach(e=>e.onclick=()=>{openTrip=e.dataset.trip;openDay=0;render()});
+}
+function dayDate(t,i){if(!t.start)return'';const d=new Date(t.start);d.setDate(d.getDate()+i);return `${d.getMonth()+1}/${d.getDate()}`}
+function renderTrip(){
+  const t=db.trips.find(x=>x.id===openTrip);if(!t){openTrip=null;return renderTrips()}
+  if(openDay>=t.days.length)openDay=t.days.length-1;
+  setTitle(t.name,`<button class="sm" id="back">← 返回</button>`);
+  document.getElementById('back').onclick=()=>{openTrip=null;render()};
+  const day=t.days[openDay],stops=day.stops.map(byId).filter(Boolean);
+  let legs='';
+  V().innerHTML=`<div class="row"><label style="margin:0">出發日</label><input type="date" id="tStart" value="${esc(t.start)}" style="width:auto">
+    <button class="sm" id="tRename">改名</button><button class="sm danger" id="tDel">刪除行程</button></div>
+  <div class="daytabs">${t.days.map((d,i)=>`<button class="chip ${i===openDay?'on':''}" data-day="${i}">Day ${i+1} ${dayDate(t,i)}</button>`).join('')}
+    <button class="chip" id="addDay">＋ 加一天</button></div>
+  <div id="tmap" class="tripmap"></div>
+  <div class="row"><button class="primary" id="addStops">＋ 加入地點</button>
+    <button id="opt" ${stops.length<3?'disabled':''}>依距離排序</button>
+    <a class="btn" id="nav" target="_blank" rel="noopener">開啟 Google Maps 路線</a>
+    <select id="mode" style="width:auto"><option value="transit">大眾運輸</option><option value="walking">步行</option><option value="driving">開車</option></select></div>
+  <div class="card">${stops.length?stops.map((p,i)=>{
+      const leg=i>0&&p.lat!=null&&stops[i-1].lat!=null?`<div class="leg">↓ 直線約 ${dist(stops[i-1],p).toFixed(1)} km</div>`:'';
+      return leg+`<div class="stop"><div class="num">${i+1}</div><div class="grow" style="min-width:0"><div style="font-weight:600;overflow-wrap:anywhere">${esc(p.name)}</div>${p.note?`<div class="meta">${esc(p.note)}</div>`:''}</div>
+      <button class="sm" data-up="${i}" ${i===0?'disabled':''}>↑</button><button class="sm" data-down="${i}" ${i===stops.length-1?'disabled':''}>↓</button><button class="sm danger" data-rm="${i}">✕</button></div>`}).join('')
+    :'<div class="empty" style="padding:20px">這天還沒有地點，點「＋ 加入地點」從收藏挑選。</div>'}</div>
+  <label>當日備註</label><textarea id="dNote" placeholder="交通、訂位、門票…">${esc(day.note||'')}</textarea>
+  ${t.days.length>1?'<button class="sm danger" id="rmDay" style="margin-top:8px">刪除這一天</button>':''}`;
+  const $=id=>document.getElementById(id);
+  $('tStart').onchange=()=>{t.start=$('tStart').value;save();render()};
+  $('tRename').onclick=()=>{const n=prompt('行程名稱',t.name);if(n){t.name=n;save();render()}};
+  $('tDel').onclick=()=>{if(confirm('刪除整個行程？（地點收藏不會被刪）')){db.trips=db.trips.filter(x=>x!==t);save();openTrip=null;render()}};
+  document.querySelectorAll('[data-day]').forEach(b=>b.onclick=()=>{openDay=+b.dataset.day;render()});
+  $('addDay').onclick=()=>{t.days.push({stops:[],note:''});openDay=t.days.length-1;save();render()};
+  if($('rmDay'))$('rmDay').onclick=()=>{if(confirm('刪除 Day '+(openDay+1)+'？')){t.days.splice(openDay,1);save();render()}};
+  $('dNote').onchange=()=>{day.note=$('dNote').value;save()};
+  const mv=(i,j)=>{const s=day.stops;[s[i],s[j]]=[s[j],s[i]];save();render()};
+  document.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>mv(+b.dataset.up,+b.dataset.up-1));
+  document.querySelectorAll('[data-down]').forEach(b=>b.onclick=()=>mv(+b.dataset.down,+b.dataset.down+1));
+  document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{day.stops.splice(+b.dataset.rm,1);save();render()});
+  $('addStops').onclick=()=>pickStops(day);
+  $('opt').onclick=()=>{ // nearest neighbour, keep first stop fixed (e.g. hotel)
+    const ps=day.stops.map(byId).filter(p=>p&&p.lat!=null),no=day.stops.filter(id=>{const p=byId(id);return!p||p.lat==null});
+    if(ps.length<3)return;const out=[ps.shift()];while(ps.length){const last=out[out.length-1];let bi=0;ps.forEach((p,i)=>{if(dist(last,p)<dist(last,ps[bi]))bi=i});out.push(ps.splice(bi,1)[0])}
+    day.stops=out.map(p=>p.id).concat(no);save();render();toast('已依距離重新排序（第一站固定）')};
+  const modeSel=$('mode');modeSel.value=localStorage.getItem('tripnote.mode')||'transit';
+  const setNav=()=>{const loc=p=>p.lat!=null?`${p.lat},${p.lng}`:encodeURIComponent(p.name);
+    if(!stops.length){$('nav').removeAttribute('href');return}
+    const o=stops[0],dst=stops[stops.length-1],w=stops.slice(1,-1);
+    let u=`https://www.google.com/maps/dir/?api=1&travelmode=${modeSel.value}&destination=${loc(dst)}`+(stops.length>1?`&origin=${loc(o)}`:'');
+    if(w.length)u+='&waypoints='+w.map(loc).join('%7C');$('nav').href=u};
+  modeSel.onchange=()=>{try{localStorage.setItem('tripnote.mode',modeSel.value)}catch(e){}setNav()};setNav();
+  $('nav').onclick=e=>{if(!stops.length){e.preventDefault();toast('先加入地點')}else if(stops.length>10)toast('Google Maps 最多支援約 10 個停靠點')};
+  leaf=makeMap('tmap');
+  const pts=stops.filter(p=>p.lat!=null);
+  stops.forEach((p,i)=>{if(p.lat!=null)marker(p,i+1).addTo(leaf)});
+  if(pts.length>1)L.polyline(pts.map(p=>[p.lat,p.lng]),{color:getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),weight:3,dashArray:'6 6'}).addTo(leaf);
+  if(pts.length)leaf.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lng])).pad(.2),{maxZoom:15});
+}
+function pickStops(day){
+  const d=document.getElementById('dlg');let q='',tg='all',sel=new Set();
+  const draw=()=>{
+    const qq=q.toLowerCase();
+    const list=db.places.filter(p=>(tg==='all'||(p.tags||[]).includes(tg))&&(!qq||[p.name,p.address,p.note,(p.tags||[]).join(' ')].join(' ').toLowerCase().includes(qq)));
+    d.querySelector('#plist2').innerHTML=list.length?list.map(p=>`<label class="pick" style="margin:0;color:var(--ink);font-size:1rem"><input type="checkbox" value="${p.id}" ${sel.has(p.id)?'checked':''}>
+      <span class="grow" style="min-width:0">${esc(p.name)}<br><span class="meta">${esc((p.tags||[]).join(' · '))}${day.stops.includes(p.id)?' · 已在這天':''}</span></span></label>`).join('')
+      :'<div class="empty">沒有地點，先到「地點」新增或匯入。</div>';
+    d.querySelectorAll('#plist2 input').forEach(c=>c.onchange=()=>{c.checked?sel.add(c.value):sel.delete(c.value);d.querySelector('#cnt').textContent=sel.size});
+  };
+  d.innerHTML=`<div class="body"><h2 style="margin-top:0">從收藏加入</h2><div class="row"><input class="grow" id="pq" placeholder="搜尋名稱 / 筆記">${allTags().length?`<select id="ptg" style="width:auto;max-width:45%"><option value="all">全部清單</option>${allTags().map(t=>`<option>${esc(t)}</option>`).join('')}</select>`:''}</div><div id="plist2" style="margin-top:8px"></div></div>
+  <div class="foot"><button id="pc">取消</button><button class="primary" id="pa">加入 <span id="cnt">0</span> 個</button></div>`;
+  d.querySelector('#pq').oninput=e=>{q=e.target.value;draw()};
+  const ptg=d.querySelector('#ptg');if(ptg)ptg.onchange=()=>{tg=ptg.value;draw()};
+  d.querySelector('#pc').onclick=()=>d.close();
+  d.querySelector('#pa').onclick=()=>{day.stops.push(...[...sel].filter(id=>!day.stops.includes(id)));save();d.close();render()};
+  draw();d.showModal();
+}
+
+// ---------- appearance ----------
+const THEME_KEY='tripnote.theme';
+const THEME_COLORS=[['--accent','主色'],['--bg','背景'],['--card','卡片底色'],['--ink','主要文字'],['--muted','次要文字'],['--line','框線'],
+  ['--c-food','餐廳'],['--c-hotel','住宿'],['--c-sight','景點'],['--c-shop','購物'],['--c-other','其他']];
+const THEME_SIZES=[['--font-size','字級',12,20,1],['--radius','圓角',0,20,1],['--gutter','左右留白',8,32,2]];
+function loadTheme(){try{return JSON.parse(localStorage.getItem(THEME_KEY))||{}}catch(e){return{}}}
+function applyTheme(){
+  const t=loadTheme(),r=document.documentElement;
+  [...THEME_COLORS,...THEME_SIZES].forEach(([k])=>t[k]?r.style.setProperty(k,t[k]):r.style.removeProperty(k));
+  if(t.mode&&t.mode!=='auto')r.dataset.theme=t.mode;else delete r.dataset.theme;
+}
+function setTheme(k,v){const t=loadTheme();if(v==null)delete t[k];else t[k]=v;try{localStorage.setItem(THEME_KEY,JSON.stringify(t))}catch(e){}applyTheme()}
+function toHex(c){c=c.trim();if(/^#[0-9a-f]{6}$/i.test(c))return c;if(/^#[0-9a-f]{3}$/i.test(c))return'#'+[...c.slice(1)].map(x=>x+x).join('');
+  const m=c.match(/\d+/g);return m?'#'+m.slice(0,3).map(n=>(+n).toString(16).padStart(2,'0')).join(''):'#000000'}
+function appearanceHTML(){
+  const t=loadTheme(),cs=getComputedStyle(document.documentElement);
+  return `<h2>外觀</h2>
+  <div class="row"><label style="margin:0">模式</label><select id="thMode" style="width:auto">${[['auto','跟隨系統'],['light','淺色'],['dark','深色']].map(([v,n])=>`<option value="${v}" ${(t.mode||'auto')===v?'selected':''}>${n}</option>`).join('')}</select></div>
+  ${THEME_SIZES.map(([k,n,min,max,st])=>{const v=parseInt(cs.getPropertyValue(k));return`<label>${n}：<span id="v${k}">${v}px</span></label><input type="range" data-size="${k}" min="${min}" max="${max}" step="${st}" value="${v}">`}).join('')}
+  <label>顏色（點色塊更換）</label>
+  <div class="card" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px">
+  ${THEME_COLORS.map(([k,n])=>`<label style="margin:0;display:flex;align-items:center;gap:8px;color:var(--ink)"><input type="color" data-color="${k}" value="${toHex(cs.getPropertyValue(k))}" style="width:40px;height:32px;padding:2px">${n}</label>`).join('')}</div>
+  <div class="meta">自訂的顏色會同時用在淺色與深色模式。</div>
+  <button id="thReset" style="margin-top:8px">恢復預設外觀</button>`;
+}
+function bindAppearance(){
+  document.getElementById('thMode').onchange=e=>{setTheme('mode',e.target.value);render()};
+  document.querySelectorAll('[data-size]').forEach(i=>i.oninput=()=>{setTheme(i.dataset.size,i.value+'px');document.getElementById('v'+i.dataset.size).textContent=i.value+'px'});
+  document.querySelectorAll('[data-color]').forEach(i=>i.oninput=()=>setTheme(i.dataset.color,i.value));
+  document.getElementById('thReset').onclick=()=>{try{localStorage.removeItem(THEME_KEY)}catch(e){}applyTheme();render()};
+}
+applyTheme();
+
+// ---------- import ----------
+function parseCSV(text){
+  const rows=[];let row=[],f='',q=false;
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){f+='"';i++}else q=false}else f+=c}
+    else if(c==='"')q=true;else if(c===','){row.push(f);f=''}else if(c==='\n'){row.push(f);rows.push(row);row=[];f=''}else if(c!=='\r')f+=c}
+  if(f||row.length){row.push(f);rows.push(row)}
+  return rows.filter(r=>r.some(x=>x.trim()));
+}
+function importCSV(text,listName){
+  const rows=parseCSV(text.replace(/^﻿/,''));if(!rows.length)return[];
+  const h=rows[0].map(x=>x.trim().toLowerCase());
+  const ix=k=>h.findIndex(x=>k.includes(x));
+  const iT=ix(['title','name','名稱','標題']),iN=ix(['note','備註','附註']),iU=ix(['url','網址']),iC=ix(['comment','留言']);
+  return rows.slice(1).map(r=>{const url=r[iU]||'',g=parseGmaps(url);const name=(r[iT]||g.name||'').trim();if(!name&&g.lat==null)return null;
+    return{name:name||`${g.lat},${g.lng}`,url,lat:g.lat,lng:g.lng,note:[r[iN],r[iC]].filter(Boolean).join(' / '),tags:[listName],cat:guessCat(name)}}).filter(Boolean);
+}
+function importGeoJSON(text,listName){
+  const j=JSON.parse(text);if(j.places&&j.trips)return'backup';
+  return(j.features||[]).map(f=>{const pr=f.properties||{},loc=pr.location||{},co=f.geometry?.coordinates||[];
+    const name=loc.name||pr.Title||pr.name||'';const g=parseGmaps(pr.google_maps_url||pr['Google Maps URL']||'');
+    let lat=co[1],lng=co[0];if(!lat&&!lng){lat=g.lat;lng=g.lng}
+    return name||lat?{name:name||g.name||`${lat},${lng}`,address:loc.address||'',url:pr.google_maps_url||'',lat:lat||undefined,lng:lng||undefined,note:pr.Comment||'',tags:[listName],cat:guessCat(name+' '+(loc.address||''))}:null}).filter(Boolean);
+}
+function importKML(text,listName){
+  const x=new DOMParser().parseFromString(text,'text/xml');
+  const docName=x.querySelector('Document > name')?.textContent?.trim()||listName;
+  return[...x.getElementsByTagName('Placemark')].map(pm=>{
+    const co=pm.getElementsByTagName('coordinates')[0]?.textContent.trim().split(/\s+/)[0].split(',');
+    const folder=pm.parentElement?.tagName==='Folder'?pm.parentElement.getElementsByTagName('name')[0]?.textContent.trim():'';
+    const name=pm.getElementsByTagName('name')[0]?.textContent.trim()||'';
+    let desc=pm.getElementsByTagName('description')[0]?.textContent||'';desc=desc.replace(/<br\s*\/?>/gi,'\n').replace(/<[^>]+>/g,'').trim();
+    if(!co||co.length<2)return null;
+    return{name:name||'未命名',lat:+co[1],lng:+co[0],note:desc,tags:[docName,folder].filter(Boolean),cat:guessCat(name+' '+folder),source:'mymaps'};
+  }).filter(Boolean);
+}
+function mergePlaces(arr){
+  let added=0,dup=0;
+  arr.forEach(n=>{
+    const ex=db.places.find(p=>(n.url&&p.url===n.url)||(p.name===n.name&&p.lat!=null&&n.lat!=null&&Math.abs(p.lat-n.lat)<1e-4&&Math.abs(p.lng-n.lng)<1e-4));
+    if(ex){ex.tags=[...new Set([...(ex.tags||[]),...(n.tags||[])])];if(ex.lat==null&&n.lat!=null){ex.lat=n.lat;ex.lng=n.lng}dup++}
+    else{if(n.lat==null||!isFinite(n.lat)){delete n.lat;delete n.lng}db.places.push({id:uid(),created:Date.now(),...n});added++}
+  });
+  save();return`新增 ${added} 個，合併重複 ${dup} 個`;
+}
+function renderImport(){
+  setTitle('設定');
+  const noCoord=db.places.filter(p=>p.lat==null).length;
+  V().innerHTML=appearanceHTML()+`
+  <h2>匯入：Google Maps 收藏清單</h2>
+  <div class="hint">Google 沒有開放 API 讀取「已儲存的清單」，要用官方匯出：<ol>
+  <li>打開 <a href="https://takeout.google.com/" target="_blank" rel="noopener">Google Takeout</a> → 先「取消全選」→ 只勾 <b>「已儲存」(Saved)</b> 與 <b>「地圖（您的地點）」</b></li>
+  <li>匯出後解壓縮，「Saved」資料夾裡每個清單是一個 <b>.csv</b>（檔名＝清單名）；星號地點是 <b>Saved Places.json</b></li>
+  <li>在下面一次選取全部檔案匯入，清單名稱會變成標籤</li></ol>
+  CSV 常常沒有座標，匯入後可按「補齊座標」自動查詢。</div>
+  <input type="file" id="fileIn" multiple accept=".csv,.json,.geojson,.kml">
+  <div class="row" style="margin-top:8px"><button id="geoAll" ${noCoord?'':'disabled'}>補齊座標（${noCoord} 個缺座標）</button><span class="meta" id="geoProg"></span></div>
+
+  <h2>匯入：Google「我的地圖」My Maps</h2>
+  <div class="hint"><b>匯入地點：</b>在 My Maps 地圖 ⋮ 選單 →「匯出至 KML/KMZ」→ 勾選 <b>「匯出為 .KML 而非 .KMZ」</b>→ 用上方的檔案選取匯入。圖層名稱會變成標籤。<br>
+  <b>直接嵌入檢視：</b>貼上 My Maps 網址（需設為「知道連結的人可檢視」），可在這裡直接看那張地圖。</div>
+  <div class="row"><input class="grow" id="mmUrl" placeholder="https://www.google.com/maps/d/edit?mid=..."><button id="mmAdd">加入</button></div>
+  ${db.mymaps.map((m,i)=>`<div class="card"><div class="row"><b class="grow">${esc(m.name)}</b>
+    <a class="btn sm" target="_blank" rel="noopener" href="https://www.google.com/maps/d/viewer?mid=${esc(m.mid)}">開啟 ↗</a>
+    <a class="btn sm" target="_blank" rel="noopener" href="https://www.google.com/maps/d/kml?mid=${esc(m.mid)}&forcekml=1">下載 KML</a>
+    <button class="sm" data-mmshow="${i}">顯示</button><button class="sm danger" data-mmrm="${i}">✕</button></div><div id="mm${i}"></div></div>`).join('')}
+
+  <h2>備份 / 搬家</h2>
+  <div class="hint">資料存在這個瀏覽器裡。換手機、換瀏覽器或之後轉成 iOS app 時，用備份檔搬過去（匯入時選 .json 備份檔即可還原）。</div>
+  <div class="row"><button id="bk">匯出備份 (.json)</button><button class="danger" id="wipe">清空全部資料</button></div>
+  <div class="meta" style="margin-top:12px">目前：${db.places.length} 個地點 · ${db.trips.length} 個行程</div>`;
+  bindAppearance();
+  const $=id=>document.getElementById(id);
+  $('fileIn').onchange=async e=>{
+    const msgs=[];
+    for(const f of e.target.files){
+      const text=await f.text(),base=f.name.replace(/\.[^.]+$/,'');
+      try{
+        if(/\.kml$/i.test(f.name))msgs.push(f.name+'：'+mergePlaces(importKML(text,base)));
+        else if(/\.csv$/i.test(f.name))msgs.push(f.name+'：'+mergePlaces(importCSV(text,base)));
+        else{const r=importGeoJSON(text,base==='Saved Places'||base==='已儲存的地點'?'星號地點':base);
+          if(r==='backup'){if(confirm('這是備份檔，要用它「取代」目前所有資料嗎？')){db=Object.assign({trips:[],mymaps:[]},JSON.parse(text));save();msgs.push('已還原備份')}}
+          else msgs.push(f.name+'：'+mergePlaces(r))}
+      }catch(err){msgs.push(f.name+'：讀取失敗 '+err.message)}
+    }
+    alert(msgs.join('\n'));render();
+  };
+  $('geoAll').onclick=async()=>{
+    const todo=db.places.filter(p=>p.lat==null);$('geoAll').disabled=true;let ok=0;
+    for(let i=0;i<todo.length;i++){
+      $('geoProg').textContent=`${i+1}/${todo.length}… ${todo[i].name}`;
+      try{const g=await geocode(todo[i].name+(todo[i].address?' '+todo[i].address:''));if(g){todo[i].lat=g.lat;todo[i].lng=g.lng;if(!todo[i].address)todo[i].address=g.address;ok++;save()}}catch(e){}
+      await new Promise(r=>setTimeout(r,1100)); // OSM 使用規範：每秒 1 次
+    }
+    toast(`補到 ${ok} / ${todo.length} 個，其餘請手動編輯`);render();
+  };
+  $('mmAdd').onclick=()=>{const u=$('mmUrl').value,m=u.match(/[?&]mid=([\w-]+)/);if(!m)return toast('找不到 mid，請貼 My Maps 完整網址');
+    const name=prompt('這張地圖的名稱','我的地圖')||'我的地圖';db.mymaps.push({mid:m[1],name});save();render()};
+  document.querySelectorAll('[data-mmshow]').forEach(b=>b.onclick=()=>{const i=+b.dataset.mmshow,box=$('mm'+i);
+    box.innerHTML=box.innerHTML?'':`<iframe class="mymap" src="https://www.google.com/maps/d/embed?mid=${encodeURIComponent(db.mymaps[i].mid)}" loading="lazy"></iframe>`});
+  document.querySelectorAll('[data-mmrm]').forEach(b=>b.onclick=()=>{db.mymaps.splice(+b.dataset.mmrm,1);save();render()});
+  $('bk').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(db,null,1)],{type:'application/json'}));
+    a.download=`tripnote-backup-${new Date().toISOString().slice(0,10)}.json`;a.click()};
+  $('wipe').onclick=()=>{if(confirm('確定清空所有地點與行程？建議先匯出備份。')&&confirm('真的要清空？無法復原')){db={places:[],trips:[],mymaps:[]};save();render()}};
+}
+
+// share-target style: ?url=... adds a place directly (useful from iOS Shortcuts)
+(()=>{const p=new URLSearchParams(location.search),u=p.get('url')||p.get('text');if(u){history.replaceState(null,'',location.pathname);setTimeout(()=>{editPlace();const f=document.getElementById('f_url');f.value=u;f.oninput()},50)}})();
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# 只公開 app 本身；想法紀錄、CLAUDE.md 等留在本機
+*
+!index.html
+!.gitignore
