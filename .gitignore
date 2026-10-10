@@ -1,4 +1,6 @@
 # 只公開 app 本身；想法紀錄、CLAUDE.md 等留在本機
 *
 !index.html
+!apple-touch-icon.png
+!icon-512.png
 !.gitignore
