@@ -266,23 +266,20 @@ async function main() {
   return `已存到旅記：${title}${cat ? "\n分類：" + result.paths.get(cat.id) : ""}`;
 }
 
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = { firstUrl, guessSource, readMeta, firstLine, classify, buildPage };
-} else {
-  let msg;
-  try {
-    msg = await main();
-  } catch (e) {
-    msg = "沒有存成功：" + e.message;
-  }
-  Script.setShortcutOutput(msg);
-  if (config.runsInApp) {
-    // 直接在 Scriptable 裡執行（測試用）時，把結果顯示出來
-    const a = new Alert();
-    a.title = "存到旅記";
-    a.message = msg;
-    a.addAction("好");
-    await a.presentAlert();
-  }
-  Script.complete();
+// Scriptable 每支腳本都有 module 物件，所以這裡不能用 module.exports 判斷環境，直接執行。
+let msg;
+try {
+  msg = await main();
+} catch (e) {
+  msg = "沒有存成功：" + e.message;
 }
+Script.setShortcutOutput(msg);
+if (config.runsInApp) {
+  // 直接在 Scriptable 裡執行（測試用）時，把結果顯示出來
+  const a = new Alert();
+  a.title = "存到旅記";
+  a.message = msg;
+  a.addAction("好");
+  await a.presentAlert();
+}
+Script.complete();
