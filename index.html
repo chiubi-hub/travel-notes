@@ -106,12 +106,16 @@ dialog .foot{display:flex;gap:8px;justify-content:flex-end;padding:10px 16px;bor
 iframe.mymap{width:100%;height:420px;border:1px solid var(--line);border-radius:calc(var(--radius) * 1.4)}
 .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:var(--radius);z-index:2000;font-size:0.933rem;max-width:90vw}
 .daytabs{display:flex;gap:6px;overflow-x:auto;padding:6px 0}
+select.sm{padding:4px 8px;font-size:0.867rem;border-radius:calc(var(--radius) * .8)}
+[data-go]{cursor:pointer}
+a[data-go]{color:var(--accent)}
 </style>
 </head>
 <body>
 <header><h1 id="title">旅記</h1><span id="headActions"></span></header>
 <main id="view"></main>
 <nav class="tabs">
+  <button data-tab="inbox">收藏</button>
   <button data-tab="places">地點</button>
   <button data-tab="map">地圖</button>
   <button data-tab="trips">行程</button>
@@ -169,7 +173,7 @@ function render(){
   document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab));
   if(leaf){leaf.remove();leaf=null}
   document.getElementById('headActions').innerHTML='';
-  ({places:renderPlaces,map:renderMap,trips:renderTrips,import:renderImport})[tab]();
+  ({inbox:renderInbox,places:renderPlaces,map:renderMap,trips:renderTrips,import:renderImport})[tab]();
   window.scrollTo(0,0);
 }
 const V=()=>document.getElementById('view');
@@ -244,7 +248,7 @@ function refreshPlaces(fit){
     document.getElementById('plmap').scrollIntoView({block:'nearest',behavior:'smooth'});leaf.setView(m.getLatLng(),Math.max(leaf.getZoom(),15));m.openPopup()});
 }
 let lastPick={trip:null,day:0};
-function addToTrip(p){
+function addToTrip(p,onDone){
   const d=document.getElementById('dlg');
   if(!db.trips.length){
     d.innerHTML=`<div class="body"><h2 style="margin-top:0">加入行程</h2><div class="meta">還沒有行程，先建立一個：</div>
@@ -253,7 +257,7 @@ function addToTrip(p){
     d.querySelector('#nt_c').onclick=()=>d.close();
     d.querySelector('#nt_ok').onclick=()=>{const n=d.querySelector('#nt_name').value.trim();if(!n)return toast('請輸入行程名稱');
       const t={id:uid(),name:n,start:'',days:Array.from({length:Math.max(1,+d.querySelector('#nt_days').value||1)},()=>({stops:[],note:''}))};
-      t.days[0].stops.push(p.id);db.trips.unshift(t);save();lastPick={trip:t.id,day:0};d.close();toast(`已加入「${n}」Day 1`)};
+      t.days[0].stops.push(p.id);db.trips.unshift(t);save();lastPick={trip:t.id,day:0};d.close();toast(`已加入「${n}」Day 1`);if(onDone)onDone()};
     return d.showModal();
   }
   let tid=db.trips.some(t=>t.id===lastPick.trip)?lastPick.trip:db.trips[0].id,day=lastPick.day;
@@ -268,12 +272,12 @@ function addToTrip(p){
     d.querySelector('#at_t').onchange=e=>{tid=e.target.value;day=0;draw()};
     d.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{day=+b.dataset.d;draw()});
     d.querySelector('#at_c').onclick=()=>d.close();
-    d.querySelector('#at_ok').onclick=()=>{const dy=t.days[day];if(dy.stops.includes(p.id))return toast('這天已經有了');dy.stops.push(p.id);save();lastPick={trip:tid,day};d.close();toast(`已加入「${t.name}」Day ${day+1}`)};
+    d.querySelector('#at_ok').onclick=()=>{const dy=t.days[day];if(dy.stops.includes(p.id))return toast('這天已經有了');dy.stops.push(p.id);save();lastPick={trip:tid,day};d.close();toast(`已加入「${t.name}」Day ${day+1}`);if(onDone)onDone()};
   };
   draw();d.showModal();
 }
-function editPlace(p){
-  const isNew=!p;p=p?{...p}:{id:uid(),cat:'other',tags:[],created:Date.now()};
+function editPlace(p,prefill,onSaved){
+  const isNew=!p;p=p?{...p}:{id:uid(),cat:'other',tags:[],created:Date.now(),...(prefill||{})};
   const d=document.getElementById('dlg');
   d.innerHTML=`<div class="body"><h2 style="margin-top:0">${isNew?'新增地點':'編輯地點'}</h2>
   <label>Google Maps 連結（貼上自動帶入名稱與座標）</label><input id="f_url" value="${esc(p.url||'')}" placeholder="https://www.google.com/maps/place/...">
@@ -299,7 +303,7 @@ function editPlace(p){
     const la=parseFloat($('f_lat').value),ln=parseFloat($('f_lng').value);if(isFinite(la)&&isFinite(ln)){p.lat=la;p.lng=ln}else{delete p.lat;delete p.lng}
     p.tags=$('f_tags').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean);
     if(isNew)db.places.unshift(p);else db.places[db.places.findIndex(x=>x.id===p.id)]=p;
-    save();d.close();render();
+    save();d.close();render();if(onSaved)onSaved(p);
   };
   d.showModal();
 }
@@ -549,6 +553,119 @@ function renderImport(){
   $('bk').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(db,null,1)],{type:'application/json'}));
     a.download=`tripnote-backup-${new Date().toISOString().slice(0,10)}.json`;a.click()};
   $('wipe').onclick=()=>{if(confirm('確定清空所有地點與行程？建議先匯出備份。')&&confirm('真的要清空？無法復原')){db={places:[],trips:[],mymaps:[]};save();render()}};
+}
+
+// ---------- 收藏：讀 Notion「旅記收藏」（經由 Google Apps Script 中繼服務） ----------
+const INBOX_KEY='tripnote.inbox';
+const ST_ALL=['待整理','已整理','已排入行程','封存'];
+const ST_FILTERS=[['open','未完成'],['待整理','待整理'],['已整理','已整理'],['已排入行程','已排入'],['封存','封存'],['all','全部']];
+let inboxCfg=(()=>{try{return JSON.parse(localStorage.getItem(INBOX_KEY))||{}}catch(e){return{}}})();
+let inbox={tree:null,cards:null,loading:false,err:''},inboxAt=null,inboxSt='open';
+async function inboxApi(method,path,body){
+  // Apps Script 只接受 GET/POST，且不能處理預檢請求，所以一律用 text/plain 的 POST 包起來
+  let r;
+  try{r=await fetch(inboxCfg.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({key:inboxCfg.key,method,path,body})})}
+  catch(e){throw new Error('連線失敗，請確認網址，以及部署時「誰可以存取」選了「所有人」')}
+  const j=await r.json().catch(()=>null);
+  if(!j)throw new Error('連線失敗 '+r.status+'，請確認網址是 /exec 結尾');
+  if(!j.ok)throw new Error(j.error||'未知錯誤');return j.data;
+}
+async function loadInbox(){
+  inbox.loading=true;inbox.err='';
+  try{const [t,c]=await Promise.all([inboxApi('GET','/tree'),inboxApi('GET','/cards')]);inbox.tree=t;inbox.cards=c}
+  catch(e){inbox.err=e.message}
+  inbox.loading=false;if(tab==='inbox')render();
+}
+const nodeById=id=>(inbox.tree||[]).find(n=>n.id===id);
+const kidsOf=id=>(inbox.tree||[]).filter(n=>(n.parent||null)===id||(!id&&n.parent&&!nodeById(n.parent))).sort((a,b)=>a.name.localeCompare(b.name,'zh-Hant'));
+function chainOf(id){const out=[],seen=new Set();for(let n=nodeById(id);n&&!seen.has(n.id);n=nodeById(n.parent)){seen.add(n.id);out.unshift(n)}return out}
+const pathOf=id=>chainOf(id).map(n=>n.name).join(' › ');
+function subtree(id){const out=new Set([id]);let grow=true;while(grow){grow=false;(inbox.tree||[]).forEach(n=>{if(n.parent&&out.has(n.parent)&&!out.has(n.id)){out.add(n.id);grow=true}})}return out}
+const stOk=c=>inboxSt==='all'||(inboxSt==='open'?(c.status!=='已排入行程'&&c.status!=='封存'):c.status===inboxSt);
+function cardsUnder(id){
+  if(id==='none')return inbox.cards.filter(c=>!c.categoryId||!nodeById(c.categoryId)).filter(stOk);
+  if(!id)return inbox.cards.filter(stOk);
+  const ids=subtree(id);return inbox.cards.filter(c=>ids.has(c.categoryId)).filter(stOk);
+}
+async function patchCard(c,body){
+  try{const n=await inboxApi('PATCH','/cards/'+c.id,body);Object.assign(c,n);if(tab==='inbox')render()}
+  catch(e){toast('Notion 更新失敗：'+e.message)}
+}
+function inboxToPlace(c){
+  const ex=c.travelId&&byId(c.travelId);
+  if(ex)return addToTrip(ex,()=>patchCard(c,{status:'已排入行程'}));
+  const g=c.mapUrl?parseGmaps(c.mapUrl):{},path=pathOf(c.categoryId);
+  editPlace(null,{name:c.place||g.name||c.title,address:c.address||'',lat:c.lat??g.lat,lng:c.lng??g.lng,url:c.mapUrl||'',
+    note:[c.title,c.url].filter(Boolean).join('\n'),tags:path?[path.split(' › ').pop()]:[],cat:guessCat(path+' '+c.title)},
+    p=>{toast('已加入地點，可再按「加入行程」');patchCard(c,{travelId:p.id,status:c.status==='待整理'?'已整理':c.status,place:p.name,address:p.address||'',lat:p.lat??null,lng:p.lng??null})});
+}
+function inboxCard(c,showPath){
+  const placed=c.travelId&&byId(c.travelId),path=pathOf(c.categoryId);
+  return `<div class="card" data-cid="${c.id}"><div class="name">${esc(c.title)}</div>
+  <div class="meta">${[c.source,c.status,showPath&&path,new Date(c.created).toLocaleDateString('zh-TW')].filter(Boolean).map(esc).join(' · ')}</div>
+  ${c.place?`<div class="meta" style="color:var(--ink)">📍 ${esc(c.place)}</div>`:''}
+  <div class="row" style="margin-top:6px">
+    <button class="sm primary" data-ip="${c.id}">${placed?'加入行程':'加入地點'}</button>
+    ${c.url?`<a class="btn sm" href="${esc(c.url)}" target="_blank" rel="noopener">原文 ↗</a>`:''}
+    <a class="btn sm" href="${esc(c.notionUrl)}" target="_blank" rel="noopener">Notion ↗</a>
+    <select class="sm" data-st="${c.id}" style="width:auto">${ST_ALL.map(x=>`<option ${x===c.status?'selected':''}>${x}</option>`).join('')}</select>
+    <select class="sm" data-mv="${c.id}" style="width:auto;max-width:100%"><option value="">改分類…</option><option value="__none">（不分類）</option>${(inbox.tree||[]).map(n=>[n.id,pathOf(n.id)]).sort((a,b)=>a[1].localeCompare(b[1],'zh-Hant')).map(([id,p])=>`<option value="${id}">${esc(p)}</option>`).join('')}</select>
+  </div></div>`;
+}
+function renderInboxSetup(){
+  setTitle('收藏');
+  V().innerHTML=`<h2>連接 Notion 收藏</h2>
+  <div class="hint">這裡會顯示你從 iPhone「分享 → 收藏」存進 Notion 的卡片，可以用分類樹瀏覽、一鍵加入地點和行程。<br>
+  需要先用你的 Google 帳號部署一個免費的中繼服務（Google Apps Script），步驟見 <a href="https://github.com/chiubi-hub/travel-notes/blob/main/gas/README.md" target="_blank" rel="noopener">設定說明</a>。</div>
+  <label>網頁應用程式網址</label><input id="ib_url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(inboxCfg.url||'')}">
+  <label>密碼（指令碼屬性裡的 APP_KEY）</label><input id="ib_key" type="password" value="${esc(inboxCfg.key||'')}">
+  ${inbox.err?`<div class="meta" style="color:var(--danger);margin-top:8px">${esc(inbox.err)}</div>`:''}
+  <div class="row" style="margin-top:12px"><button class="primary" id="ib_save">連接</button></div>`;
+  document.getElementById('ib_save').onclick=()=>{
+    const url=document.getElementById('ib_url').value.trim(),key=document.getElementById('ib_key').value.trim();
+    if(!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)||!key)return toast('請貼上 script.google.com 的網址，並填密碼');
+    inboxCfg={url,key};try{localStorage.setItem(INBOX_KEY,JSON.stringify(inboxCfg))}catch(e){}
+    inbox={tree:null,cards:null,loading:false,err:''};loadInbox();render();
+  };
+}
+function renderInbox(){
+  if(!inboxCfg.url||(inbox.err&&!inbox.tree))return renderInboxSetup();
+  if(!inbox.tree){setTitle('收藏');V().innerHTML='<div class="empty">讀取 Notion 中…</div>';if(!inbox.loading)loadInbox();return}
+  if(inboxAt&&inboxAt!=='none'&&!nodeById(inboxAt))inboxAt=null;
+  const at=inboxAt,node=at&&at!=='none'?nodeById(at):null;
+  setTitle('收藏',`<button class="sm" id="ib_ref" title="重新整理">↻</button> <button class="sm" id="ib_cfg" title="連線設定">⚙︎</button>`);
+  const crumbs=[`<a href="#" data-go="">全部</a>`,...(at==='none'?['<b>未分類</b>']:chainOf(at).map((n,i,a)=>i===a.length-1?`<b>${esc(n.name)}</b>`:`<a href="#" data-go="${n.id}">${esc(n.name)}</a>`))].join(' › ');
+  const kids=at==='none'?[]:kidsOf(at);
+  const rows=kids.map(n=>{const k=cardsUnder(n.id).length,more=kidsOf(n.id).length;
+    return `<div class="prow"><div class="info" data-go="${n.id}"><div class="name">${esc(n.name)}${more?' <span class="meta">›</span>':''}</div><div class="meta one">${esc(n.keywords||'（沒有關鍵字）')}</div></div><span class="tag">${k}</span></div>`}).join('');
+  const none=!at?cardsUnder('none').length:0;
+  const list=cardsUnder(at);
+  V().innerHTML=`<div class="meta" style="margin:4px 0 8px">${crumbs}</div>
+  <div class="chips">${ST_FILTERS.map(([k,n])=>`<button class="chip ${inboxSt===k?'on':''}" data-stf="${k}">${n}</button>`).join('')}</div>
+  ${node?`<div class="row" style="margin:4px 0"><span class="meta grow">關鍵字：${esc(node.keywords||'（無）')}</span><button class="sm" id="ib_edit">編輯</button><button class="sm" id="ib_add">＋子分類</button></div>`:
+    at!=='none'?`<div class="row" style="margin:4px 0;justify-content:flex-end"><button class="sm" id="ib_add">＋最上層分類</button></div>`:''}
+  ${rows||none?`<div class="card">${rows}${none?`<div class="prow"><div class="info" data-go="none"><div class="name">未分類</div></div><span class="tag">${none}</span></div>`:''}</div>`:''}
+  <h2 style="font-size:1rem;margin:16px 0 4px">${at?'這個分類的卡片':'最新卡片'}（${list.length}）</h2>
+  ${list.length?list.slice(0,at?500:60).map(c=>inboxCard(c,!at||kids.length>0)).join(''):'<div class="empty">沒有符合的卡片</div>'}`;
+  const $=id=>document.getElementById(id);
+  $('ib_ref').onclick=()=>{inbox.tree=null;render()};
+  $('ib_cfg').onclick=()=>{inbox.err='';renderInboxSetup()};
+  V().querySelectorAll('[data-go]').forEach(el=>el.onclick=e=>{e.preventDefault();inboxAt=el.dataset.go||null;render()});
+  V().querySelectorAll('[data-stf]').forEach(b=>b.onclick=()=>{inboxSt=b.dataset.stf;render()});
+  const card=id=>inbox.cards.find(c=>c.id===id);
+  V().querySelectorAll('[data-ip]').forEach(b=>b.onclick=()=>inboxToPlace(card(b.dataset.ip)));
+  V().querySelectorAll('[data-st]').forEach(sel=>sel.onchange=()=>patchCard(card(sel.dataset.st),{status:sel.value}));
+  V().querySelectorAll('[data-mv]').forEach(sel=>sel.onchange=()=>{if(!sel.value)return;patchCard(card(sel.dataset.mv),{categoryId:sel.value==='__none'?null:sel.value})});
+  if($('ib_add'))$('ib_add').onclick=async()=>{
+    const name=(prompt(node?`在「${node.name}」底下新增子分類，名稱：`:'新增最上層分類，名稱：')||'').trim();if(!name)return;
+    const keywords=(prompt('關鍵字（逗號分隔，可留空）','')||'').trim();
+    try{const n=await inboxApi('POST','/tree',{name,keywords,parent:node?node.id:null});inbox.tree.push(n);render();toast('已新增「'+name+'」')}catch(e){toast('新增失敗：'+e.message)}
+  };
+  if($('ib_edit'))$('ib_edit').onclick=async()=>{
+    const name=prompt('分類名稱',node.name);if(name==null)return;
+    const keywords=prompt('關鍵字（逗號分隔）',node.keywords||'');if(keywords==null)return;
+    try{Object.assign(node,await inboxApi('PATCH','/tree/'+node.id,{name:name.trim()||node.name,keywords:keywords.trim()}));render()}catch(e){toast('更新失敗：'+e.message)}
+  };
 }
 
 // share-target style: ?url=... adds a place directly (useful from iOS Shortcuts)
