@@ -732,6 +732,12 @@ function suggestCat(hay){
   return best.length===1?best[0].id:null;
 }
 function startShare(raw){
+  // 捷徑可以帶 gas（Apps Script 網址）和 key（APP_KEY），這樣 Safari 不用手動連線
+  const gas=String(raw.gas||'').trim(),key=String(raw.key||'').trim();
+  if(/^https:\/\/script\.google(usercontent)?\.com\//.test(gas)&&key&&(gas!==inboxCfg.url||key!==inboxCfg.key)){
+    inboxCfg={url:gas,key};try{localStorage.setItem(INBOX_KEY,JSON.stringify(inboxCfg))}catch(e){}
+    inbox={tree:null,cards:null,loading:false,err:''};
+  }
   const url=(String(raw.url||'').match(/https?:\/\/[^\s<>"']+/)||String(raw.text||'').match(/https?:\/\/[^\s<>"']+/)||[''])[0];
   share={url,text:String(raw.text||''),ocr:String(raw.ocr||''),meta:null,sel:undefined,open:new Set()};
   share.source=shareSource(url,share.ocr);tab='inbox';
