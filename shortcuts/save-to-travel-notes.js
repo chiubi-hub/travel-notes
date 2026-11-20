@@ -44,10 +44,20 @@ function readMeta(html) {
     return m ? decodeEntities(m[1]) : "";
   };
   const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  return {
-    title: meta("og:title") || (t ? decodeEntities(t[1]) : ""),
-    description: meta("og:description") || meta("description"),
-  };
+  const clean = (x) => String(x || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim();
+  let title = clean(meta("og:title") || (t ? decodeEntities(t[1]) : ""));
+  let description = clean(meta("og:description") || meta("description"));
+  // IG／Threads 的標題是「帳號 on Instagram: "整段貼文"」：標題只留帳號＋第一行，整段貼文放進描述
+  const m = title.match(/^(.+?) (?:on|在) (Instagram|Threads)[:：]\s*["“]?([\s\S]*?)["”]?$/);
+  if (m) {
+    const caption = m[3].trim();
+    title = (firstLine(caption) || m[1]) + "（" + m[1] + "）";
+    if (caption.length > description.length) description = caption;
+  } else if (title.includes("\n")) {
+    if (!description) description = title;
+    title = firstLine(title);
+  }
+  return { title, description };
 }
 
 function firstLine(s) {

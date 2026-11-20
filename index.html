@@ -601,7 +601,7 @@ function inboxToPlace(c){
 }
 function inboxCard(c,showPath){
   const placed=c.travelId&&byId(c.travelId),path=pathOf(c.categoryId);
-  return `<div class="card" data-cid="${c.id}"><div class="name">${esc(c.title)}</div>
+  return `<div class="card" data-cid="${c.id}"><div class="name">${esc(c.title.replace(/<br\s*\/?>/gi,' '))}</div>
   <div class="meta">${[c.source,c.status,showPath&&path,new Date(c.created).toLocaleDateString('zh-TW')].filter(Boolean).map(esc).join(' · ')}</div>
   ${c.place?`<div class="meta" style="color:var(--ink)">📍 ${esc(c.place)}</div>`:''}
   <div class="row" style="margin-top:6px">
