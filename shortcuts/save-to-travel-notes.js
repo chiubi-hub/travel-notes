@@ -269,11 +269,20 @@ async function main() {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { firstUrl, guessSource, readMeta, firstLine, classify, buildPage };
 } else {
+  let msg;
   try {
-    const msg = await main();
-    Script.setShortcutOutput(msg);
+    msg = await main();
   } catch (e) {
-    Script.setShortcutOutput("沒有存成功：" + e.message);
+    msg = "沒有存成功：" + e.message;
+  }
+  Script.setShortcutOutput(msg);
+  if (config.runsInApp) {
+    // 直接在 Scriptable 裡執行（測試用）時，把結果顯示出來
+    const a = new Alert();
+    a.title = "存到旅記";
+    a.message = msg;
+    a.addAction("好");
+    await a.presentAlert();
   }
   Script.complete();
 }
