@@ -108,6 +108,7 @@ iframe.mymap{width:100%;height:420px;border:1px solid var(--line);border-radius:
 .daytabs{display:flex;gap:6px;overflow-x:auto;padding:6px 0}
 select.sm{padding:4px 8px;font-size:0.867rem;border-radius:calc(var(--radius) * .8)}
 [data-go]{cursor:pointer}
+.thumb{display:block;width:100%;max-height:240px;object-fit:cover;border-radius:var(--radius);margin:0 0 8px;background:var(--line)}
 .trow{display:flex;align-items:center;gap:4px;padding:2px 8px;border-radius:var(--radius)}
 .trow.on{background:var(--accent);color:var(--accent-ink)}
 .trow.on .tag{color:var(--accent-ink)!important;border-color:var(--accent-ink)!important}
@@ -596,6 +597,40 @@ async function patchCard(c,body){
   try{const n=await inboxApi('PATCH','/cards/'+c.id,body);Object.assign(c,n);if(tab==='inbox')render()}
   catch(e){toast('Notion 更新失敗：'+e.message)}
 }
+// ---------- 預覽圖：壓縮成小 JPEG 再存進 Notion ----------
+const IMG_W=720,IMG_H=1600,IMG_MAX=250*1024;
+function loadImg(src){return new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>no(new Error('圖片讀取失敗'));i.src=src})}
+const blobToDataUrl=b=>new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=no;r.readAsDataURL(b)});
+async function compressImage(src){ // src：Blob 或 data URL；寬度縮到 720，太長的截圖只留上半部
+  const url=typeof src==='string'?src:await blobToDataUrl(src),img=await loadImg(url);
+  let scale=Math.min(1,IMG_W/img.naturalWidth),q=0.75,out;
+  for(let i=0;i<6;i++){
+    const w=Math.max(1,Math.round(img.naturalWidth*scale)),h=Math.min(Math.round(img.naturalHeight*scale),IMG_H);
+    const cv=document.createElement('canvas');cv.width=w;cv.height=h;const cx=cv.getContext('2d');
+    cx.fillStyle='#fff';cx.fillRect(0,0,w,h);cx.drawImage(img,0,0,w,img.naturalHeight*scale);
+    out=cv.toDataURL('image/jpeg',q);if(out.length*3/4<=IMG_MAX)break;
+    if(q>0.55)q-=0.1;else scale*=0.8;
+  }
+  return {type:'image/jpeg',b64:out.split(',')[1],url:out};
+}
+function pickImageFile(){return new Promise(ok=>{const f=document.createElement('input');f.type='file';f.accept='image/*';f.onchange=()=>ok(f.files[0]||null);f.click()})}
+async function pasteImage(){
+  if(!navigator.clipboard||!navigator.clipboard.read)throw new Error('這個瀏覽器不能讀剪貼簿，請改用「從相簿選」');
+  for(const it of await navigator.clipboard.read()){const t=it.types.find(x=>x.startsWith('image/'));if(t)return await it.getType(t)}
+  throw new Error('剪貼簿裡沒有圖片');
+}
+async function fetchPreview(url){ // 網站預覽圖：由 Apps Script 代抓，再在這裡壓縮
+  const meta=await inboxApi('POST','/meta',{url});if(!meta.image)throw new Error('這個網頁沒有預覽圖');
+  const r=await inboxApi('POST','/image',{url:meta.image});return compressImage('data:'+r.type+';base64,'+r.b64);
+}
+async function cardImage(c){
+  try{
+    let img=null;
+    if(c.url&&!c._triedAuto){c._triedAuto=true;toast('抓取預覽圖中…');img=await fetchPreview(c.url).catch(e=>{toast(e.message+'，再按一次可從相簿選');return null})}
+    else{const f=await pickImageFile();if(f)img=await compressImage(f)}
+    if(img){toast('上傳圖片中…');await patchCard(c,{image:{type:img.type,b64:img.b64}})}
+  }catch(e){toast(e.message)}
+}
 function inboxToPlace(c){
   const ex=c.travelId&&byId(c.travelId);
   if(ex)return addToTrip(ex,()=>patchCard(c,{status:'已排入行程'}));
@@ -606,13 +641,14 @@ function inboxToPlace(c){
 }
 function inboxCard(c,showPath){
   const placed=c.travelId&&byId(c.travelId),path=pathOf(c.categoryId);
-  return `<div class="card" data-cid="${c.id}"><div class="name">${esc(c.title.replace(/<br\s*\/?>/gi,' '))}</div>
+  return `<div class="card" data-cid="${c.id}">${c.image?`<img class="thumb" src="${esc(c.image)}" loading="lazy" alt="" onerror="this.remove()">`:''}<div class="name">${esc(c.title.replace(/<br\s*\/?>/gi,' '))}</div>
   <div class="meta">${[c.source,c.status,showPath&&path,new Date(c.created).toLocaleDateString('zh-TW')].filter(Boolean).map(esc).join(' · ')}</div>
   ${c.place?`<div class="meta" style="color:var(--ink)">📍 ${esc(c.place)}</div>`:''}
   <div class="row" style="margin-top:6px">
     <button class="sm primary" data-ip="${c.id}">${placed?'加入行程':'加入地點'}</button>
     ${c.url?`<a class="btn sm" href="${esc(c.url)}" target="_blank" rel="noopener">原文 ↗</a>`:''}
     <a class="btn sm" href="${esc(c.notionUrl)}" target="_blank" rel="noopener">Notion ↗</a>
+    ${c.image?'':`<button class="sm" data-img="${c.id}">＋預覽圖</button>`}
     <select class="sm" data-st="${c.id}" style="width:auto">${ST_ALL.map(x=>`<option ${x===c.status?'selected':''}>${x}</option>`).join('')}</select>
     <select class="sm" data-mv="${c.id}" style="width:auto;max-width:100%"><option value="">改分類…</option><option value="__none">（不分類）</option>${(inbox.tree||[]).map(n=>[n.id,pathOf(n.id)]).sort((a,b)=>a[1].localeCompare(b[1],'zh-Hant')).map(([id,p])=>`<option value="${id}">${esc(p)}</option>`).join('')}</select>
   </div></div>`;
@@ -661,6 +697,7 @@ function renderInbox(){
   V().querySelectorAll('[data-stf]').forEach(b=>b.onclick=()=>{inboxSt=b.dataset.stf;render()});
   const card=id=>inbox.cards.find(c=>c.id===id);
   V().querySelectorAll('[data-ip]').forEach(b=>b.onclick=()=>inboxToPlace(card(b.dataset.ip)));
+  V().querySelectorAll('[data-img]').forEach(b=>b.onclick=()=>cardImage(card(b.dataset.img)));
   V().querySelectorAll('[data-st]').forEach(sel=>sel.onchange=()=>patchCard(card(sel.dataset.st),{status:sel.value}));
   V().querySelectorAll('[data-mv]').forEach(sel=>sel.onchange=()=>{if(!sel.value)return;patchCard(card(sel.dataset.mv),{categoryId:sel.value==='__none'?null:sel.value})});
   if($('ib_add'))$('ib_add').onclick=async()=>{
@@ -677,7 +714,7 @@ function renderInbox(){
 
 // ---------- 儲存分享：捷徑打開 ?share={url,text,ocr} → 選分類 → 建立 Notion 卡片 ----------
 const LASTCAT_KEY='tripnote.lastCat';
-let share=null; // {url,text,ocr,meta,title,source,sel,open:Set}
+let share=null; // {url,text,ocr,meta,title,source,sel,open:Set,img,imgBusy}
 function shareSource(url,ocr){
   if(!url)return ocr?'截圖':'其他';const h=url.toLowerCase();
   if(/instagram\.com/.test(h))return'Instagram';if(/threads\.(net|com)/.test(h))return'Threads';
@@ -707,7 +744,11 @@ async function prepShare(){
   if(last&&!nodeById(last))last=null;
   share.sug=sug;share.last=last;share.sel=sug||last||null;
   [sug,last].filter(Boolean).forEach(id=>chainOf(id).slice(0,-1).forEach(n=>share.open.add(n.id)));
+  if(share.meta.image)share.imgBusy=true;
   if(tab==='inbox')render();
+  if(share.meta.image){const s=share;
+    inboxApi('POST','/image',{url:s.meta.image}).then(r=>compressImage('data:'+r.type+';base64,'+r.b64)).then(i=>{if(!s.img)s.img=i}).catch(()=>{})
+      .finally(()=>{s.imgBusy=false;if(share===s&&tab==='inbox')render()})}
 }
 function renderShare(){
   setTitle('存到收藏',`<button class="sm" id="sh_x">取消</button>`);
@@ -721,7 +762,12 @@ function renderShare(){
       <div class="tname" data-sel="${n.id}">${esc(n.name)}${mark}</div></div>${open?kids.map(k=>row(k,depth+1)).join(''):''}`;
   };
   const selPath=share.sel?pathOf(share.sel):'';
-  V().innerHTML=`<label>標題</label><input id="sh_title" value="${esc(shareTitleGuess())}">
+  const canPaste=!!(navigator.clipboard&&navigator.clipboard.read);
+  const imgBox=share.img?`<img class="thumb" src="${share.img.url}" alt=""><div class="row" style="margin-top:-2px"><span class="meta grow">預覽圖 ${Math.round(share.img.b64.length*3/4/1024)} KB</span><button class="sm" id="sh_pick">換一張</button><button class="sm" id="sh_rm">不要圖片</button></div>`
+    :share.imgBusy?'<div class="meta">抓取預覽圖中…</div>'
+    :`<div class="row">${canPaste?`<button class="sm ${share.url?'':'primary'}" id="sh_paste">貼上截圖</button>`:''}<button class="sm" id="sh_pick">從相簿選圖片</button><span class="meta grow">${share.url?'這個網頁沒有預覽圖':''}</span></div>`;
+  V().innerHTML=`<label>預覽圖</label>${imgBox}
+  <label>標題</label><input id="sh_title" value="${esc(shareTitleGuess())}">
   <div class="meta" style="margin-top:4px">${esc(share.source)}${share.url?' · '+esc(share.url.length>60?share.url.slice(0,60)+'…':share.url):''}</div>
   <label>分類</label><div class="card" style="padding:4px 0">${kidsOf(null).map(n=>row(n,0)).join('')||'<div class="empty">分類樹是空的</div>'}</div>
   <div class="row"><button class="sm" id="sh_add">${share.sel?'＋在「'+esc(nodeById(share.sel).name)+'」底下新增':'＋新增最上層分類'}</button><span class="grow"></span>
@@ -729,6 +775,10 @@ function renderShare(){
   <button class="primary" id="sh_save" style="width:100%;justify-content:center;margin-top:14px;padding:12px" ${share.sel?'':'disabled'}>${share.sel?'存到「'+esc(selPath)+'」':'請點選一個分類'}</button>`;
   const $=id=>document.getElementById(id);
   $('sh_title').oninput=()=>{share.title=$('sh_title').value};
+  const setImg=async get=>{const s=share;try{const b=await get();if(b){s.img=await compressImage(b);if(share===s)render()}}catch(e){toast(e.message)}};
+  if($('sh_paste'))$('sh_paste').onclick=()=>setImg(pasteImage);
+  if($('sh_pick'))$('sh_pick').onclick=()=>setImg(pickImageFile);
+  if($('sh_rm'))$('sh_rm').onclick=()=>{share.img=null;render()};
   V().querySelectorAll('[data-tog]').forEach(b=>b.onclick=()=>{const id=b.dataset.tog;share.open.has(id)?share.open.delete(id):share.open.add(id);render()});
   V().querySelectorAll('[data-sel]').forEach(el=>el.onclick=()=>{const id=el.dataset.sel;share.sel=id;if(kidsOf(id).length)share.open.add(id);render()});
   $('sh_add').onclick=async()=>{
@@ -739,7 +789,8 @@ function renderShare(){
   const doSave=async cat=>{
     const btn=$('sh_save');btn.disabled=true;btn.textContent='儲存中…';
     try{
-      const c=await inboxApi('POST','/cards',{title:$('sh_title').value.trim()||shareTitleGuess(),source:share.source,url:share.url,categoryId:cat});
+      const c=await inboxApi('POST','/cards',{title:$('sh_title').value.trim()||shareTitleGuess(),source:share.source,url:share.url,categoryId:cat,
+        image:share.img?{type:share.img.type,b64:share.img.b64}:undefined});
       if(cat)try{localStorage.setItem(LASTCAT_KEY,cat)}catch(e){}
       if(inbox.cards)inbox.cards.unshift(c);
       share=null;inboxAt=cat||'none';inboxSt='open';toast('已存到收藏'+(cat?'：'+pathOf(cat):''));render();
