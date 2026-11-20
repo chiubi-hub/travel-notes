@@ -20,15 +20,17 @@
 | 6 | 　設定變數 | 放在「如果」裡面，變數名稱 `OCR`，值：已擷取的文字 |
 | 7 | 結束如果 | 自動附上，「否則」區塊留空 |
 | 8 | 辭典（在「工序指令」分類裡） | 左邊的「鍵值」**用打的**，右邊選變數：`url` → URL、`text` → 文字、`ocr` → OCR |
-| 9 | URL 編碼（Encode URL） | 輸入：辭典 |
-| 10 | 文字 | 內容：`https://chiubi-hub.github.io/travel-notes/?share=`，後面接上一步的「已編碼的文字」 |
+| 9 | Base64 編碼（Base64 Encode） | 輸入：辭典。點「顯示更多」，把「換行」設成**無** |
+| 10 | 文字 | 內容：`https://chiubi-hub.github.io/travel-notes/?share=`，後面接上一步的「Base64 編碼」結果 |
 | 11 | 打開 URL（Open URLs） | 輸入：文字 |
 
 最後點下方的「ⓘ」，開啟「**在共享表單中顯示**」。
 
 > 第 10 步的網址，要換成你平常打開旅記的網址，並在後面加上 `?share=`。
 
-> 從舊版（Scriptable）升級的話，只要刪掉「Run Script」和「顯示通知」，再加上第 9 到 11 步就好。Scriptable App 可以刪除。
+> 從舊版（Scriptable）升級的話，只要刪掉「Run Script」和「顯示通知」，再加上第 9 到 11 步就好。
+
+> 第 9 步以前用「URL 編碼」，遇到 Podcast、臉書這類文字裡夾著網址的分享，會出現「Invalid URL」錯誤，請改成「Base64 編碼」。Scriptable App 可以刪除。
 
 ## 第一次使用
 

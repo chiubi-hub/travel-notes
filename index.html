@@ -750,7 +750,11 @@ function renderShare(){
 }
 
 // share-target style: ?url=... adds a place directly (useful from iOS Shortcuts)
-(()=>{const p=new URLSearchParams(location.search),sh=p.get('share');if(sh){history.replaceState(null,'',location.pathname);try{startShare(JSON.parse(sh))}catch(e){startShare({text:sh})}return}const u=p.get('url')||p.get('text');if(u){history.replaceState(null,'',location.pathname);setTimeout(()=>{editPlace();const f=document.getElementById('f_url');f.value=u;f.oninput()},50)}})();
+function parseShare(sh){const m=location.search.match(/[?&]share=([^&]*)/);let raw=sh;try{if(m)raw=decodeURIComponent(m[1])}catch(e){}
+try{return JSON.parse(raw)}catch(e){}
+try{const b=raw.replace(/\s/g,'').replace(/-/g,'+').replace(/_/g,'/'),bin=atob(b+'==='.slice((b.length+3)%4)),u=Uint8Array.from(bin,c=>c.charCodeAt(0));return JSON.parse(new TextDecoder().decode(u))}catch(e){}
+return {text:sh}}
+(()=>{const p=new URLSearchParams(location.search),sh=p.get('share');if(sh){history.replaceState(null,'',location.pathname);startShare(parseShare(sh));return}const u=p.get('url')||p.get('text');if(u){history.replaceState(null,'',location.pathname);setTimeout(()=>{editPlace();const f=document.getElementById('f_url');f.value=u;f.oninput()},50)}})();
 render();
 </script>
 </body>
