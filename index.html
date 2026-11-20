@@ -827,6 +827,10 @@ function storeCandidates(){
   for(const mm of all.matchAll(/(?:📍|📌|🏠|🏪|🍴|☕️?|🍜|🍰)\s*(?:店名|店家|餐廳|地點|名稱)?\s*[:：]?\s*([^\n]+)/gu))add(pickPart(mm[1]));
   for(const mm of all.matchAll(/(?:店名|店家|餐廳|店鋪|店舖|名稱|Shop|Store|Restaurant|Cafe)\s*[:：｜|]\s*([^\n]+)/gi))add(pickPart(mm[1]));
   for(const mm of all.matchAll(/[「『]([^」』\n]{2,30})[」』]/g))add(mm[1]);
+  // 【店名】，但略過「【台北美食】」這類標題
+  for(const mm of all.matchAll(/【([^】\n]{2,30})】/g))if(!/美食|推薦|必吃|攻略|懶人包|分享|開箱|食記|遊記|旅遊|景點|咖啡廳$|餐廳$/.test(mm[1]))add(mm[1]);
+  // 「台北｜店名」「京都・店名」這種開頭寫法
+  for(const t of texts){const l=firstLineOf(t);if(/^[^｜|・]{1,6}\s*[｜|・]\s*\S/.test(l))add(pickPart(l))}
   return out.slice(0,4);
 }
 function shareTitleGuess(){return share.title??((share.stores&&share.stores[0])||share.meta&&share.meta.title||firstLineOf(share.text.replace(share.url,''))||firstLineOf(share.ocr)||share.url||'未命名收藏')}
@@ -867,6 +871,7 @@ function renderShare(){
     :`<div class="row">${canPaste?`<button class="sm ${share.url?'':'primary'}" id="sh_paste">貼上截圖</button>`:''}<button class="sm" id="sh_pick">從相簿選圖片</button><span class="meta grow">${share.url?'這個網頁沒有預覽圖':''}</span></div>`;
   V().innerHTML=`<label>預覽圖</label>${imgBox}
   <label>標題</label><input id="sh_title" value="${esc(shareTitleGuess())}">
+  ${share.meta?`<details style="margin-top:4px"><summary class="meta">看辨識用的文字</summary><pre class="meta" style="white-space:pre-wrap;max-height:220px;overflow:auto;margin:4px 0">${esc(['【網頁標題】'+(share.meta.title||'（沒有）'),'【網頁描述】'+(share.meta.description||'（沒有）'),'【分享文字】'+(share.text||'（沒有）'),'【截圖文字】'+(share.ocr||'（沒有）')].join('\n\n'))}</pre></details>`:''}
   ${(share.stores||[]).length>1||(share.stores||[]).length===1&&share.title!=null&&share.title!==share.stores[0]?`<div class="chips" style="margin-top:6px"><span class="meta">店名候選：</span>${share.stores.map((x,i)=>`<button class="chip" data-store="${i}">${esc(x)}</button>`).join('')}</div>`:''}
   <div class="meta" style="margin-top:4px">${esc(share.source)}${share.url?' · '+esc(share.url.length>60?share.url.slice(0,60)+'…':share.url):''}</div>
   <label>分類</label><div class="card" style="padding:4px 0">${kidsOf(null).map(n=>row(n,0)).join('')||'<div class="empty">分類樹是空的</div>'}</div>
