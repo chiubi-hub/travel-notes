@@ -6,5 +6,5 @@
 !.gitignore
 !shortcuts/
 !shortcuts/**
-!worker/
-!worker/**
+!gas/
+!gas/**

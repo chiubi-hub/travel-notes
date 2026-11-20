@@ -555,15 +555,20 @@ function renderImport(){
   $('wipe').onclick=()=>{if(confirm('確定清空所有地點與行程？建議先匯出備份。')&&confirm('真的要清空？無法復原')){db={places:[],trips:[],mymaps:[]};save();render()}};
 }
 
-// ---------- 收藏：讀 Notion「旅記收藏」（經由 Cloudflare 中繼服務） ----------
+// ---------- 收藏：讀 Notion「旅記收藏」（經由 Google Apps Script 中繼服務） ----------
 const INBOX_KEY='tripnote.inbox';
 const ST_ALL=['待整理','已整理','已排入行程','封存'];
 const ST_FILTERS=[['open','未完成'],['待整理','待整理'],['已整理','已整理'],['已排入行程','已排入'],['封存','封存'],['all','全部']];
 let inboxCfg=(()=>{try{return JSON.parse(localStorage.getItem(INBOX_KEY))||{}}catch(e){return{}}})();
 let inbox={tree:null,cards:null,loading:false,err:''},inboxAt=null,inboxSt='open';
 async function inboxApi(method,path,body){
-  const r=await fetch(inboxCfg.url.replace(/\/+$/,'')+path,{method,headers:{'Content-Type':'application/json','X-App-Key':inboxCfg.key},body:body?JSON.stringify(body):undefined});
-  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('連線失敗 '+r.status));return j;
+  // Apps Script 只接受 GET/POST，且不能處理預檢請求，所以一律用 text/plain 的 POST 包起來
+  let r;
+  try{r=await fetch(inboxCfg.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({key:inboxCfg.key,method,path,body})})}
+  catch(e){throw new Error('連線失敗，請確認網址，以及部署時「誰可以存取」選了「所有人」')}
+  const j=await r.json().catch(()=>null);
+  if(!j)throw new Error('連線失敗 '+r.status+'，請確認網址是 /exec 結尾');
+  if(!j.ok)throw new Error(j.error||'未知錯誤');return j.data;
 }
 async function loadInbox(){
   inbox.loading=true;inbox.err='';
@@ -611,14 +616,14 @@ function renderInboxSetup(){
   setTitle('收藏');
   V().innerHTML=`<h2>連接 Notion 收藏</h2>
   <div class="hint">這裡會顯示你從 iPhone「分享 → 收藏」存進 Notion 的卡片，可以用分類樹瀏覽、一鍵加入地點和行程。<br>
-  需要先部署一個免費的中繼服務，步驟見 <a href="https://github.com/chiubi-hub/travel-notes/blob/main/worker/README.md" target="_blank" rel="noopener">部署說明</a>。</div>
-  <label>中繼服務網址</label><input id="ib_url" placeholder="https://travel-notes.你的帳號.workers.dev" value="${esc(inboxCfg.url||'')}">
-  <label>密碼（部署時設定的 APP_KEY）</label><input id="ib_key" type="password" value="${esc(inboxCfg.key||'')}">
+  需要先用你的 Google 帳號部署一個免費的中繼服務（Google Apps Script），步驟見 <a href="https://github.com/chiubi-hub/travel-notes/blob/main/gas/README.md" target="_blank" rel="noopener">設定說明</a>。</div>
+  <label>網頁應用程式網址</label><input id="ib_url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(inboxCfg.url||'')}">
+  <label>密碼（指令碼屬性裡的 APP_KEY）</label><input id="ib_key" type="password" value="${esc(inboxCfg.key||'')}">
   ${inbox.err?`<div class="meta" style="color:var(--danger);margin-top:8px">${esc(inbox.err)}</div>`:''}
   <div class="row" style="margin-top:12px"><button class="primary" id="ib_save">連接</button></div>`;
   document.getElementById('ib_save').onclick=()=>{
     const url=document.getElementById('ib_url').value.trim(),key=document.getElementById('ib_key').value.trim();
-    if(!/^https:\/\//.test(url)||!key)return toast('請填網址（https 開頭）和密碼');
+    if(!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)||!key)return toast('請貼上 script.google.com 的網址，並填密碼');
     inboxCfg={url,key};try{localStorage.setItem(INBOX_KEY,JSON.stringify(inboxCfg))}catch(e){}
     inbox={tree:null,cards:null,loading:false,err:''};loadInbox();render();
   };
