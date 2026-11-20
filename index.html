@@ -542,7 +542,7 @@ function mergePlaces(arr){
 function renderImport(){
   setTitle('設定');
   const noCoord=db.places.filter(p=>p.lat==null).length;
-  V().innerHTML=appearanceHTML()+`
+  V().innerHTML=inboxConnHTML()+appearanceHTML()+`
   <h2>匯入：Google Maps 收藏清單</h2>
   <div class="hint">Google 沒有開放 API 讀取「已儲存的清單」，要用官方匯出：<ol>
   <li>打開 <a href="https://takeout.google.com/" target="_blank" rel="noopener">Google Takeout</a> → 先「取消全選」→ 只勾 <b>「已儲存」(Saved)</b> 與 <b>「地圖（您的地點）」</b></li>
@@ -565,7 +565,7 @@ function renderImport(){
   <div class="hint">資料存在這個瀏覽器裡。換手機、換瀏覽器或之後轉成 iOS app 時，用備份檔搬過去（匯入時選 .json 備份檔即可還原）。</div>
   <div class="row"><button id="bk">匯出備份 (.json)</button><button class="danger" id="wipe">清空全部資料</button></div>
   <div class="meta" style="margin-top:12px">目前：${db.places.length} 個地點 · ${db.trips.length} 個行程</div>`;
-  bindAppearance();
+  bindAppearance();bindInboxConn();
   const $=id=>document.getElementById(id);
   $('fileIn').onchange=async e=>{
     const msgs=[];
@@ -697,22 +697,40 @@ function inboxCard(c,showPath){
     <select class="sm" data-mv="${c.id}" style="width:auto;max-width:100%"><option value="">改分類…</option><option value="__none">（不分類）</option>${(inbox.tree||[]).map(n=>[n.id,pathOf(n.id)]).sort((a,b)=>a[1].localeCompare(b[1],'zh-Hant')).map(([id,p])=>`<option value="${id}">${esc(p)}</option>`).join('')}</select>
   </div></div>`;
 }
-function renderInboxSetup(){
-  setTitle('收藏');
-  V().innerHTML=`<h2>連接 Notion 收藏</h2>
-  <div class="hint">這裡會顯示你從 iPhone「分享 → 收藏」存進 Notion 的卡片，可以用分類樹瀏覽、一鍵加入地點和行程。<br>
-  需要先用你的 Google 帳號部署一個免費的中繼服務（Google Apps Script），步驟見 <a href="https://github.com/chiubi-hub/travel-notes/blob/main/gas/README.md" target="_blank" rel="noopener">設定說明</a>。</div>
-  ${share?'<div class="hint" style="color:var(--ink)">連線後會回到「存到收藏」畫面，剛才分享的內容不會遺失。</div>':''}
+// 收藏的連線設定放在「設定」頁，存在這台裝置上，之後不用再填
+const GAS_RE=/^https:\/\/script\.google(usercontent)?\.com\//;
+function saveInboxCfg(url,key){inboxCfg=url?{url,key}:{};try{url?localStorage.setItem(INBOX_KEY,JSON.stringify(inboxCfg)):localStorage.removeItem(INBOX_KEY)}catch(e){}inbox={tree:null,cards:null,loading:false,err:''}}
+function inboxConnHTML(){
+  const ok=inboxCfg.url&&inbox.tree&&!inbox.err;
+  return `<h2>收藏（Notion 連線）</h2>
+  <div class="meta">狀態：${!inboxCfg.url?'尚未設定':inbox.loading?'連線中…':ok?`<b style="color:var(--accent)">已連接 ✓</b>（${(inbox.cards||[]).length} 張卡片）`:inbox.err?`<span style="color:var(--danger)">連線失敗：${esc(inbox.err)}</span>`:'已儲存'}</div>
+  <div class="hint">填一次就會記在這台裝置上。網址和密碼在 Google Apps Script 裡，步驟見 <a href="https://github.com/chiubi-hub/travel-notes/blob/main/gas/README.md" target="_blank" rel="noopener">設定說明</a>。<br>
+  用 iPhone 捷徑「收藏」分享時，捷徑也會自動帶入，不用手動填。<br>
+  注意：Safari 和「加入主畫面」的旅記是分開存的，兩邊各需要設定一次。</div>
   <label>網頁應用程式網址</label><input id="ib_url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(inboxCfg.url||'')}">
   <label>密碼（指令碼屬性裡的 APP_KEY）</label><input id="ib_key" type="password" value="${esc(inboxCfg.key||'')}">
-  ${inbox.err?`<div class="meta" style="color:var(--danger);margin-top:8px">${esc(inbox.err)}</div>`:''}
-  <div class="row" style="margin-top:12px"><button class="primary" id="ib_save">連接</button></div>`;
-  document.getElementById('ib_save').onclick=()=>{
+  <div class="row" style="margin-top:8px"><button class="primary" id="ib_save">儲存並測試</button>${inboxCfg.url?'<button id="ib_clear">清除</button>':''}</div>`;
+}
+function bindInboxConn(){
+  document.getElementById('ib_save').onclick=async()=>{
     const url=document.getElementById('ib_url').value.trim(),key=document.getElementById('ib_key').value.trim();
-    if(!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)||!key)return toast('請貼上 script.google.com 的網址，並填密碼');
-    inboxCfg={url,key};try{localStorage.setItem(INBOX_KEY,JSON.stringify(inboxCfg))}catch(e){}
-    inbox={tree:null,cards:null,loading:false,err:''};loadInbox();render();
+    if(!GAS_RE.test(url)||!key)return toast('請貼上 script.google.com 的網址，並填密碼');
+    saveInboxCfg(url,key);render();await loadInbox();
+    if(inbox.err)toast('連線失敗：'+inbox.err);
+    else{toast('已連接，讀到 '+inbox.cards.length+' 張卡片');if(share){tab='inbox'}}
+    render();
   };
+  const c=document.getElementById('ib_clear');if(c)c.onclick=()=>{if(confirm('清除這台裝置上的收藏連線設定？')){saveInboxCfg('');render()}};
+}
+function renderInboxSetup(){
+  setTitle('收藏');
+  V().innerHTML=`<h2>${inboxCfg.url?'連不到 Notion 收藏':'還沒連接 Notion 收藏'}</h2>
+  <div class="hint">這裡會顯示你從 iPhone「分享 → 收藏」存進 Notion 的卡片。${inboxCfg.url?'':'請先到「設定」填入連線網址和密碼，填一次就會記住。'}</div>
+  ${share?'<div class="hint" style="color:var(--ink)">連線後會回到「存到收藏」畫面，剛才分享的內容不會遺失。</div>':''}
+  ${inbox.err?`<div class="meta" style="color:var(--danger);margin-top:8px">${esc(inbox.err)}</div>`:''}
+  <div class="row" style="margin-top:12px">${inboxCfg.url?'<button class="primary" id="ib_retry">重試</button>':''}<button ${inboxCfg.url?'':'class="primary"'} id="ib_go">前往設定</button></div>`;
+  document.getElementById('ib_go').onclick=()=>{tab='import';render()};
+  const r=document.getElementById('ib_retry');if(r)r.onclick=()=>{inbox.err='';render();loadInbox()};
 }
 function renderInbox(){
   if(!inboxCfg.url||(inbox.err&&!inbox.tree))return renderInboxSetup();
@@ -738,7 +756,7 @@ function renderInbox(){
   ${list.length?list.slice(0,at?500:60).map(c=>inboxCard(c,!at||kids.length>0)).join(''):'<div class="empty">沒有符合的卡片</div>'}`;
   const $=id=>document.getElementById(id);
   $('ib_ref').onclick=()=>loadInbox();
-  $('ib_cfg').onclick=()=>{inbox.err='';renderInboxSetup()};
+  $('ib_cfg').onclick=()=>{tab='import';render()};
   V().querySelectorAll('[data-go]').forEach(el=>el.onclick=e=>{e.preventDefault();inboxAt=el.dataset.go||null;render()});
   V().querySelectorAll('[data-stf]').forEach(b=>b.onclick=()=>{inboxSt=b.dataset.stf;render()});
   const card=id=>inbox.cards.find(c=>c.id===id);
@@ -780,10 +798,7 @@ function suggestCat(hay){
 function startShare(raw){
   // 捷徑可以帶 gas（Apps Script 網址）和 key（APP_KEY），這樣 Safari 不用手動連線
   const gas=String(raw.gas||'').trim(),key=String(raw.key||'').trim();
-  if(/^https:\/\/script\.google(usercontent)?\.com\//.test(gas)&&key&&(gas!==inboxCfg.url||key!==inboxCfg.key)){
-    inboxCfg={url:gas,key};try{localStorage.setItem(INBOX_KEY,JSON.stringify(inboxCfg))}catch(e){}
-    inbox={tree:null,cards:null,loading:false,err:''};
-  }
+  if(GAS_RE.test(gas)&&key&&(gas!==inboxCfg.url||key!==inboxCfg.key))saveInboxCfg(gas,key);
   const url=(String(raw.url||'').match(/https?:\/\/[^\s<>"']+/)||String(raw.text||'').match(/https?:\/\/[^\s<>"']+/)||[''])[0];
   share={url,text:String(raw.text||''),ocr:String(raw.ocr||''),meta:null,sel:undefined,open:new Set()};
   share.source=shareSource(url,share.ocr);tab='inbox';
