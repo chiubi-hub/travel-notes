@@ -206,29 +206,46 @@ async function loadTree(token) {
   return nodes;
 }
 
-async function pick(title, options) {
-  const a = new Alert();
-  a.title = "選擇分類";
-  a.message = title;
-  options.forEach((o) => a.addAction(o));
-  a.addCancelAction("取消");
-  const i = await a.presentSheet();
-  return i;
-}
+const LAST_KEY = "travelnotes.lastCategory";
 
+// 一層一層點進去的分類選單。
+// 起點：有唯一自動建議時，停在建議節點的上一層；否則停在上次選的分類的上一層；都沒有就從最上層開始。
 async function chooseCategory(nodes, result, title) {
   const { best, paths } = result;
-  if (best.length === 1) return best[0];
-  const all = [...nodes].sort((x, y) => paths.get(x.id).localeCompare(paths.get(y.id), "zh-Hant"));
-  const cands = best.length ? best : [];
-  const labels = [...cands.map((n) => paths.get(n.id)), "看全部分類…", "先不分類"];
-  let i = await pick(title, labels);
-  if (i === -1) throw new Error("已取消");
-  if (i < cands.length) return cands[i];
-  if (labels[i] === "先不分類") return null;
-  i = await pick(title, [...all.map((n) => paths.get(n.id)), "先不分類"]);
-  if (i === -1) throw new Error("已取消");
-  return i < all.length ? all[i] : null;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const kids = (id) => nodes
+    .filter((n) => n.parent === id || (!id && n.parent && !byId.has(n.parent)))
+    .sort((x, y) => x.name.localeCompare(y.name, "zh-Hant"));
+  const suggested = best.length === 1 ? best[0] : null;
+  const lastId = Keychain.contains(LAST_KEY) ? Keychain.get(LAST_KEY) : null;
+  const anchor = suggested || (lastId && byId.get(lastId)) || null;
+  const mark = new Set(best.map((n) => n.id));
+  if (lastId) mark.add(lastId);
+  let cur = anchor ? byId.get(anchor.parent) || null : null;
+
+  for (;;) {
+    const children = kids(cur ? cur.id : null);
+    const a = new Alert();
+    a.title = cur ? paths.get(cur.id) : "選擇分類";
+    a.message = title + (suggested ? "\n建議：" + paths.get(suggested.id) : "");
+    const acts = [];
+    if (cur) { a.addAction("✓ 存在「" + cur.name + "」"); acts.push({ save: cur }); }
+    for (const n of children) {
+      const more = kids(n.id).length > 0;
+      const star = n === suggested ? "★ " : mark.has(n.id) ? "☆ " : "";
+      a.addAction(star + n.name + (more ? "  ›" : ""));
+      acts.push(more ? { go: n } : { save: n });
+    }
+    if (cur) { a.addAction("‹ 回上一層"); acts.push({ go: byId.get(cur.parent) || null, up: true }); }
+    a.addAction("先不分類"); acts.push({ none: true });
+    a.addCancelAction("取消");
+    const i = await a.presentSheet();
+    if (i === -1) throw new Error("已取消");
+    const act = acts[i];
+    if (act.none) return null;
+    if (act.save) { Keychain.set(LAST_KEY, act.save.id); return act.save; }
+    cur = act.go;
+  }
 }
 
 async function main() {

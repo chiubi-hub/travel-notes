@@ -6,3 +6,5 @@
 !.gitignore
 !shortcuts/
 !shortcuts/**
+!worker/
+!worker/**
