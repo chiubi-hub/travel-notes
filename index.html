@@ -576,10 +576,15 @@ async function inboxApi(method,path,body){
   if(!j)throw new Error('連線失敗 '+r.status+'，請確認網址是 /exec 結尾');
   if(!j.ok)throw new Error(j.error||'未知錯誤');return j.data;
 }
+// 收藏資料先存一份在手機：打開時立刻顯示上次的資料，背景再向 Notion 更新
+const CACHE_KEY='tripnote.inboxCache';
+(()=>{try{const c=JSON.parse(localStorage.getItem(CACHE_KEY));if(c&&c.url===inboxCfg.url&&c.tree&&c.cards){inbox.tree=c.tree;inbox.cards=c.cards}}catch(e){}})();
+function saveInboxCache(){try{if(inbox.tree&&inbox.cards)localStorage.setItem(CACHE_KEY,JSON.stringify({url:inboxCfg.url,tree:inbox.tree,cards:inbox.cards}))}catch(e){}}
 async function loadInbox(){
-  inbox.loading=true;inbox.err='';
-  try{const [t,c]=await Promise.all([inboxApi('GET','/tree'),inboxApi('GET','/cards')]);inbox.tree=t;inbox.cards=c}
-  catch(e){inbox.err=e.message}
+  if(inbox.loading)return;
+  inbox.loading=true;inbox.err='';if(tab==='inbox'&&inbox.tree)render();
+  try{const [t,c]=await Promise.all([inboxApi('GET','/tree'),inboxApi('GET','/cards')]);inbox.tree=t;inbox.cards=c;inbox.fresh=true;saveInboxCache()}
+  catch(e){inbox.err=e.message;if(inbox.tree){inbox.fresh=true;toast('更新失敗，顯示的是上次的資料：'+e.message)}}
   inbox.loading=false;if(tab==='inbox')render();
 }
 const nodeById=id=>(inbox.tree||[]).find(n=>n.id===id);
@@ -673,10 +678,12 @@ function renderInboxSetup(){
 function renderInbox(){
   if(!inboxCfg.url||(inbox.err&&!inbox.tree))return renderInboxSetup();
   if(!inbox.tree){setTitle('收藏');V().innerHTML='<div class="empty">讀取 Notion 中…</div>';if(!inbox.loading)loadInbox();return}
+  if(!inbox.fresh&&!inbox.loading)setTimeout(loadInbox);
+  saveInboxCache();
   if(share)return renderShare();
   if(inboxAt&&inboxAt!=='none'&&!nodeById(inboxAt))inboxAt=null;
   const at=inboxAt,node=at&&at!=='none'?nodeById(at):null;
-  setTitle('收藏',`<button class="sm" id="ib_ref" title="重新整理">↻</button> <button class="sm" id="ib_cfg" title="連線設定">⚙︎</button>`);
+  setTitle('收藏',`${inbox.loading?'<span class="meta">更新中…</span> ':''}<button class="sm" id="ib_ref" title="重新整理" ${inbox.loading?'disabled':''}>↻</button> <button class="sm" id="ib_cfg" title="連線設定">⚙︎</button>`);
   const crumbs=[`<a href="#" data-go="">全部</a>`,...(at==='none'?['<b>未分類</b>']:chainOf(at).map((n,i,a)=>i===a.length-1?`<b>${esc(n.name)}</b>`:`<a href="#" data-go="${n.id}">${esc(n.name)}</a>`))].join(' › ');
   const kids=at==='none'?[]:kidsOf(at);
   const rows=kids.map(n=>{const k=cardsUnder(n.id).length,more=kidsOf(n.id).length;
@@ -691,7 +698,7 @@ function renderInbox(){
   <h2 style="font-size:1rem;margin:16px 0 4px">${at?'這個分類的卡片':'最新卡片'}（${list.length}）</h2>
   ${list.length?list.slice(0,at?500:60).map(c=>inboxCard(c,!at||kids.length>0)).join(''):'<div class="empty">沒有符合的卡片</div>'}`;
   const $=id=>document.getElementById(id);
-  $('ib_ref').onclick=()=>{inbox.tree=null;render()};
+  $('ib_ref').onclick=()=>loadInbox();
   $('ib_cfg').onclick=()=>{inbox.err='';renderInboxSetup()};
   V().querySelectorAll('[data-go]').forEach(el=>el.onclick=e=>{e.preventDefault();inboxAt=el.dataset.go||null;render()});
   V().querySelectorAll('[data-stf]').forEach(b=>b.onclick=()=>{inboxSt=b.dataset.stf;render()});
@@ -743,23 +750,28 @@ function startShare(raw){
   share.source=shareSource(url,share.ocr);tab='inbox';
 }
 function shareTitleGuess(){return share.title??(share.meta&&share.meta.title||firstLineOf(share.text.replace(share.url,''))||firstLineOf(share.ocr)||share.url||'未命名收藏')}
-async function prepShare(){
-  share.meta=share.url?await inboxApi('POST','/meta',{url:share.url}).catch(()=>({title:'',description:''})):{title:'',description:''};
-  const sug=suggestCat([share.meta.title,share.meta.description,share.text,share.ocr,share.url].join('\n'));
-  let last=null;try{last=localStorage.getItem(LASTCAT_KEY)}catch(e){}
+// 分類樹先顯示（用分享文字比對），網頁標題抓回來後再更新建議；使用者已經點過分類就不改
+function suggestShare(){
+  const m=share.meta||{},sug=suggestCat([m.title,m.description,share.text,share.ocr,share.url].join('\n'));
+  let last=share.last;if(last===undefined){try{last=localStorage.getItem(LASTCAT_KEY)}catch(e){last=null}}
   if(last&&!nodeById(last))last=null;
-  share.sug=sug;share.last=last;share.sel=sug||last||null;
+  share.sug=sug;share.last=last;if(!share.picked)share.sel=sug||last||null;
   [sug,last].filter(Boolean).forEach(id=>chainOf(id).slice(0,-1).forEach(n=>share.open.add(n.id)));
-  if(share.meta.image)share.imgBusy=true;
+}
+async function prepShare(){
+  const s=share;
+  s.meta=s.url?await inboxApi('POST','/meta',{url:s.url}).catch(()=>({title:'',description:''})):{title:'',description:''};
+  if(share!==s)return;
+  suggestShare();s.imgBusy=!!s.meta.image;
   if(tab==='inbox')render();
-  if(share.meta.image){const s=share;
+  if(s.meta.image){
     inboxApi('POST','/image',{url:s.meta.image}).then(r=>compressImage('data:'+r.type+';base64,'+r.b64)).then(i=>{if(!s.img)s.img=i}).catch(()=>{})
       .finally(()=>{s.imgBusy=false;if(share===s&&tab==='inbox')render()})}
 }
 function renderShare(){
   setTitle('存到收藏',`<button class="sm" id="sh_x">取消</button>`);
   document.getElementById('sh_x').onclick=()=>{share=null;render()};
-  if(share.meta===null){V().innerHTML='<div class="empty">讀取分享內容中…</div>';if(!share.loading){share.loading=true;prepShare()}return}
+  if(!share.started){share.started=true;share.imgBusy=!!share.url;suggestShare();prepShare()}
   const row=(n,depth)=>{
     const kids=kidsOf(n.id),open=share.open.has(n.id),on=share.sel===n.id;
     const mark=n.id===share.sug?' <span class="tag" style="color:var(--accent);border-color:var(--accent)">★ 建議</span>':n.id===share.last?' <span class="tag">上次</span>':'';
@@ -786,11 +798,11 @@ function renderShare(){
   if($('sh_pick'))$('sh_pick').onclick=()=>setImg(pickImageFile);
   if($('sh_rm'))$('sh_rm').onclick=()=>{share.img=null;render()};
   V().querySelectorAll('[data-tog]').forEach(b=>b.onclick=()=>{const id=b.dataset.tog;share.open.has(id)?share.open.delete(id):share.open.add(id);render()});
-  V().querySelectorAll('[data-sel]').forEach(el=>el.onclick=()=>{const id=el.dataset.sel;share.sel=id;if(kidsOf(id).length)share.open.add(id);render()});
+  V().querySelectorAll('[data-sel]').forEach(el=>el.onclick=()=>{const id=el.dataset.sel;share.sel=id;share.picked=true;if(kidsOf(id).length)share.open.add(id);render()});
   $('sh_add').onclick=async()=>{
     const par=share.sel?nodeById(share.sel):null,name=(prompt(par?`在「${par.name}」底下新增分類，名稱：`:'新增最上層分類，名稱：')||'').trim();if(!name)return;
     const keywords=(prompt('關鍵字（逗號分隔，可留空）','')||'').trim();
-    try{const n=await inboxApi('POST','/tree',{name,keywords,parent:par?par.id:null});inbox.tree.push(n);if(par)share.open.add(par.id);share.sel=n.id;render()}catch(e){toast('新增失敗：'+e.message)}
+    try{const n=await inboxApi('POST','/tree',{name,keywords,parent:par?par.id:null});inbox.tree.push(n);if(par)share.open.add(par.id);share.sel=n.id;share.picked=true;render()}catch(e){toast('新增失敗：'+e.message)}
   };
   const doSave=async cat=>{
     const btn=$('sh_save');btn.disabled=true;btn.textContent='儲存中…';
