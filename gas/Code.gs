@@ -113,6 +113,68 @@ function cardProps(b) {
   return props;
 }
 
+// ---------- 抓網頁標題（給分類比對用，不會存進卡片） ----------
+function decodeEntities(s) {
+  return String(s || "")
+    .replace(/&#(\d+);/g, function (_, n) { return String.fromCodePoint(+n); })
+    .replace(/&#x([0-9a-f]+);/gi, function (_, n) { return String.fromCodePoint(parseInt(n, 16)); })
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").trim();
+}
+function firstLine(s) {
+  const line = String(s || "").split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean)[0] || "";
+  return line.length > 80 ? line.slice(0, 80) + "…" : line;
+}
+function readMeta(html) {
+  const meta = function (prop) {
+    const re1 = new RegExp("<meta[^>]+(?:property|name)=[\"']" + prop + "[\"'][^>]*content=[\"']([^\"']*)[\"']", "i");
+    const re2 = new RegExp("<meta[^>]+content=[\"']([^\"']*)[\"'][^>]*(?:property|name)=[\"']" + prop + "[\"']", "i");
+    const m = html.match(re1) || html.match(re2);
+    return m ? decodeEntities(m[1]) : "";
+  };
+  const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const clean = function (x) { return String(x || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim(); };
+  let title = clean(meta("og:title") || (t ? decodeEntities(t[1]) : ""));
+  let description = clean(meta("og:description") || meta("description"));
+  const m = title.match(/^(.+?) (?:on|在) (Instagram|Threads)[:：]\s*["“]?([\s\S]*?)["”]?$/);
+  if (m) {
+    const caption = m[3].trim();
+    title = (firstLine(caption) || m[1]) + "（" + m[1] + "）";
+    if (caption.length > description.length) description = caption;
+  } else if (title.indexOf("\n") >= 0) {
+    if (!description) description = title;
+    title = firstLine(title);
+  }
+  return { title: title, description: description };
+}
+function fetchMeta(url) {
+  if (!/^https?:\/\//i.test(url || "")) throw new HttpError(400, "網址格式錯誤");
+  try {
+    const r = UrlFetchApp.fetch(url, {
+      muteHttpExceptions: true, followRedirects: true,
+      headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" },
+    });
+    return readMeta(r.getContentText().slice(0, 500000));
+  } catch (e) {
+    return { title: "", description: "" }; // 抓不到（例如登入牆）就只存連結
+  }
+}
+
+function newCard(b) {
+  const SOURCES = ["Instagram", "Threads", "網頁", "截圖", "照片", "影片", "其他"];
+  const props = {
+    "標題": { title: text(b.title || b.url || "未命名收藏") },
+    "來源": { select: { name: SOURCES.indexOf(b.source) >= 0 ? b.source : "其他" } },
+    "狀態": { status: { name: "待整理" } },
+  };
+  if (b.url) props["原始連結"] = { url: String(b.url).slice(0, 2000) };
+  if (b.categoryId) {
+    if (!ID_RE.test(b.categoryId)) throw new HttpError(400, "分類格式錯誤");
+    props["分類"] = { relation: [{ id: b.categoryId }] };
+  }
+  return { parent: { database_id: CARD_DB }, properties: props };
+}
+
 function handle(req, token) {
   const parts = String(req.path || "").split("/").filter(Boolean);
   const res = parts[0], id = parts[1], method = req.method, body = req.body || {};
@@ -129,6 +191,8 @@ function handle(req, token) {
   if (res === "cards" && method === "GET" && !id) {
     return queryAll(token, CARD_DB, { sorts: [{ timestamp: "created_time", direction: "descending" }] }).map(toCard);
   }
+  if (res === "meta" && method === "POST" && !id) return fetchMeta(body.url);
+  if (res === "cards" && method === "POST" && !id) return toCard(notion(token, "POST", "pages", newCard(body)));
   if (res === "cards" && method === "PATCH" && id) {
     return toCard(notion(token, "PATCH", "pages/" + id, { properties: cardProps(body) }));
   }

@@ -108,6 +108,11 @@ iframe.mymap{width:100%;height:420px;border:1px solid var(--line);border-radius:
 .daytabs{display:flex;gap:6px;overflow-x:auto;padding:6px 0}
 select.sm{padding:4px 8px;font-size:0.867rem;border-radius:calc(var(--radius) * .8)}
 [data-go]{cursor:pointer}
+.trow{display:flex;align-items:center;gap:4px;padding:2px 8px;border-radius:var(--radius)}
+.trow.on{background:var(--accent);color:var(--accent-ink)}
+.trow.on .tag{color:var(--accent-ink)!important;border-color:var(--accent-ink)!important}
+.trow .tog{border:0;background:none;color:inherit;width:2rem;padding:8px 0;justify-content:center}
+.trow .tname{flex:1;padding:9px 4px;cursor:pointer}
 a[data-go]{color:var(--accent)}
 </style>
 </head>
@@ -617,6 +622,7 @@ function renderInboxSetup(){
   V().innerHTML=`<h2>連接 Notion 收藏</h2>
   <div class="hint">這裡會顯示你從 iPhone「分享 → 收藏」存進 Notion 的卡片，可以用分類樹瀏覽、一鍵加入地點和行程。<br>
   需要先用你的 Google 帳號部署一個免費的中繼服務（Google Apps Script），步驟見 <a href="https://github.com/chiubi-hub/travel-notes/blob/main/gas/README.md" target="_blank" rel="noopener">設定說明</a>。</div>
+  ${share?'<div class="hint" style="color:var(--ink)">連線後會回到「存到收藏」畫面，剛才分享的內容不會遺失。</div>':''}
   <label>網頁應用程式網址</label><input id="ib_url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(inboxCfg.url||'')}">
   <label>密碼（指令碼屬性裡的 APP_KEY）</label><input id="ib_key" type="password" value="${esc(inboxCfg.key||'')}">
   ${inbox.err?`<div class="meta" style="color:var(--danger);margin-top:8px">${esc(inbox.err)}</div>`:''}
@@ -631,6 +637,7 @@ function renderInboxSetup(){
 function renderInbox(){
   if(!inboxCfg.url||(inbox.err&&!inbox.tree))return renderInboxSetup();
   if(!inbox.tree){setTitle('收藏');V().innerHTML='<div class="empty">讀取 Notion 中…</div>';if(!inbox.loading)loadInbox();return}
+  if(share)return renderShare();
   if(inboxAt&&inboxAt!=='none'&&!nodeById(inboxAt))inboxAt=null;
   const at=inboxAt,node=at&&at!=='none'?nodeById(at):null;
   setTitle('收藏',`<button class="sm" id="ib_ref" title="重新整理">↻</button> <button class="sm" id="ib_cfg" title="連線設定">⚙︎</button>`);
@@ -668,8 +675,82 @@ function renderInbox(){
   };
 }
 
+// ---------- 儲存分享：捷徑打開 ?share={url,text,ocr} → 選分類 → 建立 Notion 卡片 ----------
+const LASTCAT_KEY='tripnote.lastCat';
+let share=null; // {url,text,ocr,meta,title,source,sel,open:Set}
+function shareSource(url,ocr){
+  if(!url)return ocr?'截圖':'其他';const h=url.toLowerCase();
+  if(/instagram\.com/.test(h))return'Instagram';if(/threads\.(net|com)/.test(h))return'Threads';
+  if(/youtube\.com|youtu\.be|tiktok\.com|vimeo\.com/.test(h))return'影片';return'網頁';
+}
+const firstLineOf=s=>{const l=String(s||'').split(/\r?\n/).map(x=>x.trim()).find(Boolean)||'';return l.length>80?l.slice(0,80)+'…':l};
+// 路徑分數：根到節點的路徑上有幾個節點的關鍵字出現在文字裡；同分取較深者
+function suggestCat(hay){
+  const t=String(hay||'').toLowerCase(),tree=inbox.tree||[];
+  const kw=n=>[n.name,...String(n.keywords||'').split(/[,，、]/)].map(k=>k.trim().toLowerCase()).filter(Boolean);
+  const hit=new Set(tree.filter(n=>kw(n).some(k=>t.includes(k))).map(n=>n.id));
+  let best=[],bs=0,bd=0;
+  tree.forEach(n=>{if(!hit.has(n.id))return;const c=chainOf(n.id),sc=c.filter(x=>hit.has(x.id)).length,d=c.length;
+    if(sc>bs||(sc===bs&&d>bd)){best=[n];bs=sc;bd=d}else if(sc===bs&&d===bd)best.push(n)});
+  return best.length===1?best[0].id:null;
+}
+function startShare(raw){
+  const url=(String(raw.url||'').match(/https?:\/\/[^\s<>"']+/)||String(raw.text||'').match(/https?:\/\/[^\s<>"']+/)||[''])[0];
+  share={url,text:String(raw.text||''),ocr:String(raw.ocr||''),meta:null,sel:undefined,open:new Set()};
+  share.source=shareSource(url,share.ocr);tab='inbox';
+}
+function shareTitleGuess(){return share.title??(share.meta&&share.meta.title||firstLineOf(share.text.replace(share.url,''))||firstLineOf(share.ocr)||share.url||'未命名收藏')}
+async function prepShare(){
+  share.meta=share.url?await inboxApi('POST','/meta',{url:share.url}).catch(()=>({title:'',description:''})):{title:'',description:''};
+  const sug=suggestCat([share.meta.title,share.meta.description,share.text,share.ocr,share.url].join('\n'));
+  let last=null;try{last=localStorage.getItem(LASTCAT_KEY)}catch(e){}
+  if(last&&!nodeById(last))last=null;
+  share.sug=sug;share.last=last;share.sel=sug||last||null;
+  [sug,last].filter(Boolean).forEach(id=>chainOf(id).slice(0,-1).forEach(n=>share.open.add(n.id)));
+  if(tab==='inbox')render();
+}
+function renderShare(){
+  setTitle('存到收藏',`<button class="sm" id="sh_x">取消</button>`);
+  document.getElementById('sh_x').onclick=()=>{share=null;render()};
+  if(share.meta===null){V().innerHTML='<div class="empty">讀取分享內容中…</div>';if(!share.loading){share.loading=true;prepShare()}return}
+  const row=(n,depth)=>{
+    const kids=kidsOf(n.id),open=share.open.has(n.id),on=share.sel===n.id;
+    const mark=n.id===share.sug?' <span class="tag" style="color:var(--accent);border-color:var(--accent)">★ 建議</span>':n.id===share.last?' <span class="tag">上次</span>':'';
+    return `<div class="trow ${on?'on':''}" style="padding-left:${8+depth*18}px">
+      <button class="tog" data-tog="${n.id}" ${kids.length?'':'disabled'}>${kids.length?(open?'▾':'▸'):'·'}</button>
+      <div class="tname" data-sel="${n.id}">${esc(n.name)}${mark}</div></div>${open?kids.map(k=>row(k,depth+1)).join(''):''}`;
+  };
+  const selPath=share.sel?pathOf(share.sel):'';
+  V().innerHTML=`<label>標題</label><input id="sh_title" value="${esc(shareTitleGuess())}">
+  <div class="meta" style="margin-top:4px">${esc(share.source)}${share.url?' · '+esc(share.url.length>60?share.url.slice(0,60)+'…':share.url):''}</div>
+  <label>分類</label><div class="card" style="padding:4px 0">${kidsOf(null).map(n=>row(n,0)).join('')||'<div class="empty">分類樹是空的</div>'}</div>
+  <div class="row"><button class="sm" id="sh_add">${share.sel?'＋在「'+esc(nodeById(share.sel).name)+'」底下新增':'＋新增最上層分類'}</button><span class="grow"></span>
+  <button class="sm" id="sh_none">先不分類</button></div>
+  <button class="primary" id="sh_save" style="width:100%;justify-content:center;margin-top:14px;padding:12px" ${share.sel?'':'disabled'}>${share.sel?'存到「'+esc(selPath)+'」':'請點選一個分類'}</button>`;
+  const $=id=>document.getElementById(id);
+  $('sh_title').oninput=()=>{share.title=$('sh_title').value};
+  V().querySelectorAll('[data-tog]').forEach(b=>b.onclick=()=>{const id=b.dataset.tog;share.open.has(id)?share.open.delete(id):share.open.add(id);render()});
+  V().querySelectorAll('[data-sel]').forEach(el=>el.onclick=()=>{const id=el.dataset.sel;share.sel=id;if(kidsOf(id).length)share.open.add(id);render()});
+  $('sh_add').onclick=async()=>{
+    const par=share.sel?nodeById(share.sel):null,name=(prompt(par?`在「${par.name}」底下新增分類，名稱：`:'新增最上層分類，名稱：')||'').trim();if(!name)return;
+    const keywords=(prompt('關鍵字（逗號分隔，可留空）','')||'').trim();
+    try{const n=await inboxApi('POST','/tree',{name,keywords,parent:par?par.id:null});inbox.tree.push(n);if(par)share.open.add(par.id);share.sel=n.id;render()}catch(e){toast('新增失敗：'+e.message)}
+  };
+  const doSave=async cat=>{
+    const btn=$('sh_save');btn.disabled=true;btn.textContent='儲存中…';
+    try{
+      const c=await inboxApi('POST','/cards',{title:$('sh_title').value.trim()||shareTitleGuess(),source:share.source,url:share.url,categoryId:cat});
+      if(cat)try{localStorage.setItem(LASTCAT_KEY,cat)}catch(e){}
+      if(inbox.cards)inbox.cards.unshift(c);
+      share=null;inboxAt=cat||'none';inboxSt='open';toast('已存到收藏'+(cat?'：'+pathOf(cat):''));render();
+    }catch(e){toast('儲存失敗：'+e.message);btn.disabled=false;btn.textContent='再試一次'}
+  };
+  $('sh_save').onclick=()=>share.sel&&doSave(share.sel);
+  $('sh_none').onclick=()=>doSave(null);
+}
+
 // share-target style: ?url=... adds a place directly (useful from iOS Shortcuts)
-(()=>{const p=new URLSearchParams(location.search),u=p.get('url')||p.get('text');if(u){history.replaceState(null,'',location.pathname);setTimeout(()=>{editPlace();const f=document.getElementById('f_url');f.value=u;f.oninput()},50)}})();
+(()=>{const p=new URLSearchParams(location.search),sh=p.get('share');if(sh){history.replaceState(null,'',location.pathname);try{startShare(JSON.parse(sh))}catch(e){startShare({text:sh})}return}const u=p.get('url')||p.get('text');if(u){history.replaceState(null,'',location.pathname);setTimeout(()=>{editPlace();const f=document.getElementById('f_url');f.value=u;f.oninput()},50)}})();
 render();
 </script>
 </body>
