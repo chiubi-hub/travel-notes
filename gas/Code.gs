@@ -6,6 +6,9 @@
 //   NOTION_TOKEN  Notion 整合「旅遊收藏」的金鑰
 //   APP_KEY       自己訂的一組密碼，旅記連線時要輸入同一組
 // 設定步驟見 gas/README.md。
+//
+// 預覽圖：旅記先把圖片壓縮成小 JPEG，再交給這支程式用 Notion 的檔案上傳 API 存進卡片的「預覽圖」欄位，
+// 所以原本網站的圖片連結過期也不影響。
 
 const TREE_DB = "41e75a8073c581598735d163f176de97"; // 分類樹
 const CARD_DB = "41e75a8073c581e0ab66dfbc343c3ca1"; // 收藏卡片
@@ -50,6 +53,13 @@ function queryAll(token, db, extra) {
 const plain = (arr) => (arr || []).map((t) => t.plain_text).join("");
 const text = (s) => [{ type: "text", text: { content: String(s || "").slice(0, 2000) } }];
 
+// Notion 回傳的檔案網址約 1 小時後失效，旅記每次讀取都會拿到新的。
+function fileUrl(prop) {
+  const f = prop && prop.files && prop.files[0];
+  if (!f) return "";
+  return (f.file && f.file.url) || (f.external && f.external.url) || "";
+}
+
 function toNode(p) {
   const pr = p.properties || {};
   const rel = (pr["上層分類"] && pr["上層分類"].relation) || [];
@@ -78,6 +88,7 @@ function toCard(p) {
     lng: pr["經度"] ? pr["經度"].number : null,
     mapUrl: (pr["地圖連結"] && pr["地圖連結"].url) || "",
     travelId: plain(pr["旅記 ID"] && pr["旅記 ID"].rich_text),
+    image: fileUrl(pr["預覽圖"]),
     created: p.created_time,
   };
 }
@@ -145,7 +156,8 @@ function readMeta(html) {
     if (!description) description = title;
     title = firstLine(title);
   }
-  return { title: title, description: description };
+  let image = meta("og:image:secure_url") || meta("og:image") || meta("twitter:image") || meta("twitter:image:src");
+  return { title: title, description: description, image: image };
 }
 function fetchMeta(url) {
   if (!/^https?:\/\//i.test(url || "")) throw new HttpError(400, "網址格式錯誤");
@@ -154,10 +166,63 @@ function fetchMeta(url) {
       muteHttpExceptions: true, followRedirects: true,
       headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" },
     });
-    return readMeta(r.getContentText().slice(0, 500000));
+    const m = readMeta(r.getContentText().slice(0, 500000));
+    if (m.image && !/^https?:\/\//i.test(m.image)) {
+      const base = url.match(/^https?:\/\/[^\/]+/i)[0];
+      m.image = m.image.indexOf("//") === 0 ? "https:" + m.image : m.image.charAt(0) === "/" ? base + m.image : "";
+    }
+    return m;
   } catch (e) {
-    return { title: "", description: "" }; // 抓不到（例如登入牆）就只存連結
+    return { title: "", description: "", image: "" }; // 抓不到（例如登入牆）就只存連結
   }
+}
+
+// ---------- 預覽圖 ----------
+const IMG_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const MAX_IMG = 5 * 1024 * 1024; // Notion 免費方案單檔上限
+
+// 下載網站的預覽圖交給旅記壓縮（瀏覽器不能直接讀別的網站的圖片）
+function fetchImage(url) {
+  if (!/^https?:\/\//i.test(url || "")) throw new HttpError(400, "圖片網址格式錯誤");
+  const r = UrlFetchApp.fetch(url, {
+    muteHttpExceptions: true, followRedirects: true,
+    headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148" },
+  });
+  if (r.getResponseCode() >= 400) throw new HttpError(502, "抓不到預覽圖");
+  const blob = r.getBlob(), type = String(blob.getContentType() || "").split(";")[0].toLowerCase();
+  const bytes = blob.getBytes();
+  if (type.indexOf("image/") !== 0) throw new HttpError(415, "不是圖片");
+  if (bytes.length > 15 * 1024 * 1024) throw new HttpError(413, "預覽圖太大");
+  return { type: type, b64: Utilities.base64Encode(bytes) };
+}
+
+// 用 Notion 檔案上傳 API 上傳，回傳 file_upload id
+function uploadImage(token, img) {
+  const type = String(img.type || "image/jpeg").toLowerCase();
+  if (IMG_TYPES.indexOf(type) < 0) throw new HttpError(415, "圖片格式不支援");
+  const bytes = Utilities.base64Decode(String(img.b64 || ""));
+  if (!bytes.length) throw new HttpError(400, "圖片是空的");
+  if (bytes.length > MAX_IMG) throw new HttpError(413, "圖片超過 5MB");
+  const name = "preview." + type.split("/")[1].replace("jpeg", "jpg");
+  const up = notion(token, "POST", "file_uploads", { mode: "single_part", filename: name, content_type: type });
+  const res = UrlFetchApp.fetch("https://api.notion.com/v1/file_uploads/" + up.id + "/send", {
+    method: "post",
+    headers: { Authorization: "Bearer " + token, "Notion-Version": NOTION_VERSION },
+    payload: { file: Utilities.newBlob(bytes, type, name) },
+    muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() >= 400) {
+    let msg = res.getResponseCode();
+    try { msg = JSON.parse(res.getContentText()).message || msg; } catch (e) {}
+    throw new HttpError(res.getResponseCode(), "Notion 上傳圖片：" + msg);
+  }
+  return { name: name, id: up.id };
+}
+
+function imageProp(token, img) {
+  if (!img) return { files: [] };
+  const u = uploadImage(token, img);
+  return { files: [{ type: "file_upload", file_upload: { id: u.id }, name: u.name }] };
 }
 
 function newCard(b) {
@@ -192,9 +257,16 @@ function handle(req, token) {
     return queryAll(token, CARD_DB, { sorts: [{ timestamp: "created_time", direction: "descending" }] }).map(toCard);
   }
   if (res === "meta" && method === "POST" && !id) return fetchMeta(body.url);
-  if (res === "cards" && method === "POST" && !id) return toCard(notion(token, "POST", "pages", newCard(body)));
+  if (res === "image" && method === "POST" && !id) return fetchImage(body.url);
+  if (res === "cards" && method === "POST" && !id) {
+    const page = newCard(body);
+    if (body.image) page.properties["預覽圖"] = imageProp(token, body.image);
+    return toCard(notion(token, "POST", "pages", page));
+  }
   if (res === "cards" && method === "PATCH" && id) {
-    return toCard(notion(token, "PATCH", "pages/" + id, { properties: cardProps(body) }));
+    const props = cardProps(body);
+    if (body.image !== undefined) props["預覽圖"] = imageProp(token, body.image); // null = 移除
+    return toCard(notion(token, "PATCH", "pages/" + id, { properties: props }));
   }
   throw new HttpError(404, "沒有這個路徑");
 }
