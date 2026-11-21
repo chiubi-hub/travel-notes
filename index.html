@@ -833,7 +833,25 @@ function storeCandidates(){
   for(const t of texts){const l=firstLineOf(t);if(/^[^｜|・]{1,6}\s*[｜|・]\s*\S/.test(l))add(pickPart(l))}
   return out.slice(0,4);
 }
-function shareTitleGuess(){return share.title??((share.stores&&share.stores[0])||share.meta&&share.meta.title||firstLineOf(share.text.replace(share.url,''))||firstLineOf(share.ocr)||share.url||'未命名收藏')}
+// ---------- 城市辨識：找不到店名時改用城市當標題 ----------
+// 每組第一個是要顯示的名稱，後面是其他寫法（繁簡日英）
+const CITIES=`台北/臺北/Taipei|新北/New Taipei|基隆/Keelung|桃園/Taoyuan|新竹/Hsinchu|苗栗|台中/臺中/Taichung|彰化|南投|雲林|嘉義/Chiayi|台南/臺南/Tainan|高雄/Kaohsiung|屏東|宜蘭/Yilan|花蓮/Hualien|台東/臺東/Taitung|澎湖|金門|馬祖|墾丁|九份|淡水|日月潭|阿里山
+東京/Tokyo|大阪/Osaka|京都/Kyoto|奈良/Nara|神戶/神戸/Kobe|橫濱/横浜/Yokohama|名古屋/Nagoya|福岡/Fukuoka|札幌/Sapporo|小樽/Otaru|函館/Hakodate|富良野|沖繩/沖縄/Okinawa|那霸/那覇/Naha|金澤/金沢/Kanazawa|廣島/広島/Hiroshima|仙台/Sendai|鎌倉/Kamakura|箱根/Hakone|輕井澤/軽井沢/Karuizawa|長崎/Nagasaki|熊本/Kumamoto|鹿兒島/鹿児島/Kagoshima|別府/Beppu|高松/Takamatsu|岡山/Okayama|姬路/姫路/Himeji|宇治/Uji|嵐山/Arashiyama|北海道/Hokkaido
+首爾/首尔/서울/Seoul|釜山/부산/Busan|濟州/济州/제주/Jeju|大邱/Daegu|香港/Hong Kong|澳門/Macau|曼谷/Bangkok|清邁/Chiang Mai|普吉/Phuket|新加坡/Singapore|吉隆坡/Kuala Lumpur|峇里島/巴厘島/Bali|河內/Hanoi|胡志明/Ho Chi Minh|峴港/Da Nang|宿霧/Cebu|長灘島/Boracay
+巴黎/Paris|倫敦/London|羅馬/Rome|米蘭/Milan|佛羅倫斯/Florence|威尼斯/Venice|巴塞隆納/Barcelona|馬德里/Madrid|維也納/Vienna|布拉格/Prague|柏林/Berlin|慕尼黑/Munich|阿姆斯特丹/Amsterdam|蘇黎世/Zurich|伊斯坦堡/Istanbul|紐約/New York|洛杉磯/Los Angeles|舊金山/San Francisco|西雅圖/Seattle|溫哥華/Vancouver|雪梨/Sydney|墨爾本/Melbourne`.split(/[|\n]/).map(g=>g.trim().split('/'));
+const CITY_ALIAS=new Map();CITIES.forEach(g=>g.forEach(a=>CITY_ALIAS.set(a.toLowerCase(),g[0])));
+const CITY_RE=new RegExp([...CITY_ALIAS.keys()].sort((a,b)=>b.length-a.length).map(x=>{const e=x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');return /^[a-z ]+$/.test(x)?'\\b'+e+'\\b':e}).join('|'),'gi');
+function cityIn(text){ // 出現最多次的城市；同次數取先出現的
+  const cnt=new Map();for(const m of String(text||'').matchAll(CITY_RE)){const c=CITY_ALIAS.get(m[0].toLowerCase());cnt.set(c,(cnt.get(c)||0)+1)}
+  let best='',bn=0;cnt.forEach((n,c)=>{if(n>bn){best=c;bn=n}});return best;
+}
+function shareCity(){
+  const m=share.meta||{},c=cityIn([m.title,m.description,share.text,share.ocr].join('\n'));if(c)return c;
+  // 文字裡沒有，就看選的分類路徑上有沒有城市（例如 美食地點 › 日本 › 京都 › 咖啡）
+  const path=share.sel?chainOf(share.sel):[];for(let i=path.length-1;i>=0;i--){const x=CITY_ALIAS.get(path[i].name.toLowerCase());if(x)return x}
+  return '';
+}
+function shareTitleGuess(){return share.title??((share.stores&&share.stores[0])||shareCity()||share.meta&&share.meta.title||firstLineOf(share.text.replace(share.url,''))||firstLineOf(share.ocr)||share.url||'未命名收藏')}
 // 分類樹先顯示（用分享文字比對），網頁標題抓回來後再更新建議；使用者已經點過分類就不改
 function suggestShare(){
   share.stores=storeCandidates();
@@ -872,7 +890,8 @@ function renderShare(){
   V().innerHTML=`<label>預覽圖</label>${imgBox}
   <label>標題</label><input id="sh_title" value="${esc(shareTitleGuess())}">
   ${share.meta?`<details style="margin-top:4px"><summary class="meta">看辨識用的文字</summary><pre class="meta" style="white-space:pre-wrap;max-height:220px;overflow:auto;margin:4px 0">${esc(['【網頁標題】'+(share.meta.title||'（沒有）'),'【網頁描述】'+(share.meta.description||'（沒有）'),'【分享文字】'+(share.text||'（沒有）'),'【截圖文字】'+(share.ocr||'（沒有）')].join('\n\n'))}</pre></details>`:''}
-  ${(share.stores||[]).length>1||(share.stores||[]).length===1&&share.title!=null&&share.title!==share.stores[0]?`<div class="chips" style="margin-top:6px"><span class="meta">店名候選：</span>${share.stores.map((x,i)=>`<button class="chip" data-store="${i}">${esc(x)}</button>`).join('')}</div>`:''}
+  ${(()=>{const c=shareCity(),opts=[...(share.stores||[]),...(c&&!(share.stores||[]).includes(c)?[c]:[])];share.opts=opts;
+    return opts.length>1||opts.length===1&&share.title!=null&&share.title!==opts[0]?`<div class="chips" style="margin-top:6px"><span class="meta">標題候選：</span>${opts.map((x,i)=>`<button class="chip" data-store="${i}">${esc(x)}</button>`).join('')}</div>`:''})()}
   <div class="meta" style="margin-top:4px">${esc(share.source)}${share.url?' · '+esc(share.url.length>60?share.url.slice(0,60)+'…':share.url):''}</div>
   <label>分類</label><div class="card" style="padding:4px 0">${kidsOf(null).map(n=>row(n,0)).join('')||'<div class="empty">分類樹是空的</div>'}</div>
   <div class="row"><button class="sm" id="sh_add">${share.sel?'＋在「'+esc(nodeById(share.sel).name)+'」底下新增':'＋新增最上層分類'}</button><span class="grow"></span>
@@ -880,7 +899,7 @@ function renderShare(){
   <button class="primary" id="sh_save" style="width:100%;justify-content:center;margin-top:14px;padding:12px" ${share.sel?'':'disabled'}>${share.sel?'存到「'+esc(selPath)+'」':'請點選一個分類'}</button>`;
   const $=id=>document.getElementById(id);
   $('sh_title').oninput=()=>{share.title=$('sh_title').value};
-  V().querySelectorAll('[data-store]').forEach(b=>b.onclick=()=>{share.title=share.stores[+b.dataset.store];render()});
+  V().querySelectorAll('[data-store]').forEach(b=>b.onclick=()=>{share.title=share.opts[+b.dataset.store];render()});
   const setImg=async get=>{const s=share;try{const b=await get();if(b){s.img=await compressImage(b);if(share===s)render()}}catch(e){toast(e.message)}};
   if($('sh_paste'))$('sh_paste').onclick=()=>setImg(pasteImage);
   if($('sh_pick'))$('sh_pick').onclick=()=>setImg(pickImageFile);
