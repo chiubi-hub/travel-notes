@@ -605,7 +605,7 @@ const INBOX_KEY='tripnote.inbox';
 const ST_ALL=['待整理','已整理','已排入行程','封存'];
 const ST_FILTERS=[['open','未完成'],['待整理','待整理'],['已整理','已整理'],['已排入行程','已排入'],['封存','封存'],['all','全部']];
 let inboxCfg=(()=>{try{return JSON.parse(localStorage.getItem(INBOX_KEY))||{}}catch(e){return{}}})();
-let inbox={tree:null,cards:null,loading:false,err:''},inboxAt=null,inboxSt='open';
+let inbox={tree:null,cards:null,loading:false,err:''},inboxAt=null,inboxSt='open',inboxMode='cat',inboxPlace=[];
 async function inboxApi(method,path,body){
   // Apps Script 只接受 GET/POST，且不能處理預檢請求，所以一律用 text/plain 的 POST 包起來
   let r;
@@ -732,12 +732,50 @@ function renderInboxSetup(){
   document.getElementById('ib_go').onclick=()=>{tab='import';render()};
   const r=document.getElementById('ib_retry');if(r)r.onclick=()=>{inbox.err='';render();loadInbox()};
 }
+// ---------- 依地點瀏覽 ----------
+// 分類樹是「菜系 › 地點 › 城市」，所以把每個分類從第二層開始的名稱當成地點路徑，
+// 不同菜系底下同名的地點（例如 台式›Taiwan›台北、西式›Taiwan›台北）會合併在一起。
+const placeSegs=id=>chainOf(id).slice(1).map(n=>n.name);
+const samePrefix=(segs,pre)=>pre.every((x,i)=>segs[i]===x);
+function modeChips(){return `<div class="chips" style="margin:0 0 6px">${[['cat','依分類'],['place','依地點']].map(([k,n])=>`<button class="chip ${inboxMode===k?'on':''}" data-mode="${k}">${n}</button>`).join('')}</div>`}
+function bindModeChips(){V().querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{inboxMode=b.dataset.mode;render()})}
+function renderInboxPlace(){
+  setTitle('收藏',`${inbox.loading?'<span class="meta">更新中…</span> ':''}<button class="sm" id="ib_ref" title="重新整理" ${inbox.loading?'disabled':''}>↻</button>`);
+  const pre=inboxPlace,noPlace=pre.length===1&&pre[0]===null;
+  const cardSegs=c=>c.categoryId&&nodeById(c.categoryId)?placeSegs(c.categoryId):[];
+  const kidNames=[];
+  if(!noPlace)(inbox.tree||[]).forEach(n=>{const sg=placeSegs(n.id);if(sg.length===pre.length+1&&samePrefix(sg,pre)&&!kidNames.includes(sg[pre.length]))kidNames.push(sg[pre.length])});
+  kidNames.sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+  const under=p=>inbox.cards.filter(stOk).filter(c=>{const sg=cardSegs(c);return sg.length>=p.length&&samePrefix(sg,p)});
+  const list=noPlace?inbox.cards.filter(stOk).filter(c=>!cardSegs(c).length):pre.length?under(pre):inbox.cards.filter(stOk).filter(c=>cardSegs(c).length);
+  const noneN=!pre.length?inbox.cards.filter(stOk).filter(c=>!cardSegs(c).length).length:0;
+  const crumbs=[`<a href="#" data-pl="">所有地點</a>`,...(noPlace?['<b>沒有地點</b>']:pre.map((x,i)=>i===pre.length-1?`<b>${esc(x)}</b>`:`<a href="#" data-pl="${i+1}">${esc(x)}</a>`))].join(' › ');
+  const rows=kidNames.map(x=>{const p=[...pre,x],k=under(p).length,more=(inbox.tree||[]).some(n=>{const sg=placeSegs(n.id);return sg.length>p.length&&samePrefix(sg,p)});
+    return `<div class="prow"><div class="info" data-plk="${esc(x)}"><div class="name">${esc(x)}${more?' <span class="meta">›</span>':''}</div></div><span class="tag">${k}</span></div>`}).join('');
+  V().innerHTML=`${modeChips()}<div class="meta" style="margin:4px 0 8px">${crumbs}</div>
+  <div class="chips">${ST_FILTERS.map(([k,n])=>`<button class="chip ${inboxSt===k?'on':''}" data-stf="${k}">${n}</button>`).join('')}</div>
+  ${rows||noneN?`<div class="card">${rows}${noneN?`<div class="prow"><div class="info" data-plnone="1"><div class="name">沒有地點</div><div class="meta one">只分到第一層的卡片</div></div><span class="tag">${noneN}</span></div>`:''}</div>`:''}
+  <h2 style="font-size:1rem;margin:16px 0 4px">${pre.length?(noPlace?'沒有地點的卡片':esc(pre[pre.length-1])+' 的所有卡片'):'有地點的卡片'}（${list.length}）</h2>
+  ${list.length?list.slice(0,500).map(c=>inboxCard(c,true)).join(''):'<div class="empty">沒有符合的卡片</div>'}`;
+  document.getElementById('ib_ref').onclick=()=>loadInbox();
+  bindModeChips();
+  V().querySelectorAll('[data-pl]').forEach(a=>a.onclick=e=>{e.preventDefault();inboxPlace=a.dataset.pl?pre.slice(0,+a.dataset.pl):[];render()});
+  V().querySelectorAll('[data-plk]').forEach(el=>el.onclick=()=>{inboxPlace=[...pre,el.dataset.plk];render()});
+  V().querySelectorAll('[data-plnone]').forEach(el=>el.onclick=()=>{inboxPlace=[null];render()});
+  V().querySelectorAll('[data-stf]').forEach(b=>b.onclick=()=>{inboxSt=b.dataset.stf;render()});
+  const card=id=>inbox.cards.find(c=>c.id===id);
+  V().querySelectorAll('[data-ip]').forEach(b=>b.onclick=()=>inboxToPlace(card(b.dataset.ip)));
+  V().querySelectorAll('[data-img]').forEach(b=>b.onclick=()=>cardImage(card(b.dataset.img)));
+  V().querySelectorAll('[data-st]').forEach(sel=>sel.onchange=()=>patchCard(card(sel.dataset.st),{status:sel.value}));
+  V().querySelectorAll('[data-mv]').forEach(sel=>sel.onchange=()=>{if(!sel.value)return;patchCard(card(sel.dataset.mv),{categoryId:sel.value==='__none'?null:sel.value})});
+}
 function renderInbox(){
   if(!inboxCfg.url||(inbox.err&&!inbox.tree))return renderInboxSetup();
   if(!inbox.tree){setTitle('收藏');V().innerHTML='<div class="empty">讀取 Notion 中…</div>';if(!inbox.loading)loadInbox();return}
   if(!inbox.fresh&&!inbox.loading)setTimeout(loadInbox);
   saveInboxCache();
   if(share)return renderShare();
+  if(inboxMode==='place')return renderInboxPlace();
   if(inboxAt&&inboxAt!=='none'&&!nodeById(inboxAt))inboxAt=null;
   const at=inboxAt,node=at&&at!=='none'?nodeById(at):null;
   setTitle('收藏',`${inbox.loading?'<span class="meta">更新中…</span> ':''}<button class="sm" id="ib_ref" title="重新整理" ${inbox.loading?'disabled':''}>↻</button> <button class="sm" id="ib_cfg" title="連線設定">⚙︎</button>`);
@@ -747,7 +785,7 @@ function renderInbox(){
     return `<div class="prow"><div class="info" data-go="${n.id}"><div class="name">${esc(n.name)}${more?' <span class="meta">›</span>':''}</div><div class="meta one">${esc(n.keywords||'（沒有關鍵字）')}</div></div><span class="tag">${k}</span></div>`}).join('');
   const none=!at?cardsUnder('none').length:0;
   const list=cardsUnder(at);
-  V().innerHTML=`<div class="meta" style="margin:4px 0 8px">${crumbs}</div>
+  V().innerHTML=`${modeChips()}<div class="meta" style="margin:4px 0 8px">${crumbs}</div>
   <div class="chips">${ST_FILTERS.map(([k,n])=>`<button class="chip ${inboxSt===k?'on':''}" data-stf="${k}">${n}</button>`).join('')}</div>
   ${node?`<div class="row" style="margin:4px 0"><span class="meta grow">關鍵字：${esc(node.keywords||'（無）')}</span><button class="sm" id="ib_edit">編輯</button><button class="sm" id="ib_add">＋子分類</button></div>`:
     at!=='none'?`<div class="row" style="margin:4px 0;justify-content:flex-end"><button class="sm" id="ib_add">＋最上層分類</button></div>`:''}
@@ -759,6 +797,7 @@ function renderInbox(){
   $('ib_cfg').onclick=()=>{tab='import';render()};
   V().querySelectorAll('[data-go]').forEach(el=>el.onclick=e=>{e.preventDefault();inboxAt=el.dataset.go||null;render()});
   V().querySelectorAll('[data-stf]').forEach(b=>b.onclick=()=>{inboxSt=b.dataset.stf;render()});
+  bindModeChips();
   const card=id=>inbox.cards.find(c=>c.id===id);
   V().querySelectorAll('[data-ip]').forEach(b=>b.onclick=()=>inboxToPlace(card(b.dataset.ip)));
   V().querySelectorAll('[data-img]').forEach(b=>b.onclick=()=>cardImage(card(b.dataset.img)));
